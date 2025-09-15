@@ -193,6 +193,7 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
 
     ui = TrackerUI(cfg, on_config_change)
     ui.build()
+    ui.show_loader()
     threading.Thread(target=ui.render_loop, daemon=True).start()
 
     async with MakcuAsyncController(cfg.controller) as ctrl:
@@ -226,11 +227,18 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
                 frame = uv2.decode_jpeg_cv2(buf)
             if frame is None:
                 continue
+            # first frame -> switch UI to main
+            try:
+                ui.show_main()
+            except Exception as e:
+                print(f"[UI] show_main failed: {e}")
 
             timer.tick()
             h, w = frame.shape[:2]
 
             centroid, mask_bgr, roi_rect = state["tracker"].process(frame)
+            if centroid is None:
+                print("[DEBUG] No target found in frame")
 
             target_scr: Optional[Tuple[int, int]] = None
             mapper_obj = state["mapper"]
@@ -247,6 +255,8 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
             if centroid is not None:
                 x_scr, y_scr = mapper_obj.map_point(centroid, (w, h))
                 target_scr = (x_scr, y_scr)
+            else:
+                print("[DEBUG] centroid None; skip mapping")
 
             # Prepare visualization
             disp = frame
@@ -276,7 +286,11 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
                 dx, dy = state["smoother"].step_delta(est, smoothed)
                 await ctrl.move_delta(dx, dy)
             else:
-                # No target detected; keep smoother state but don't move
+                if not state["cfg"].aimbot:
+                    print("[DEBUG] aimbot off; not moving")
+                if target_scr is None:
+                    print("[DEBUG] target_scr None; not moving")
+                # No target or disabled control: keep smoother state but don't move
                 state["smoother"].smooth(None)
 
             # Send frame to UI viewer (top area)

@@ -4,6 +4,7 @@ import asyncio
 import json
 import threading
 from dataclasses import asdict
+import time
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -29,8 +30,11 @@ class TrackerUI:
         self.cfg = cfg
         self.on_config_change = on_config_change
         self._texture_id = None
+        self._tex_size = (1280, 720)
         self._lock = threading.Lock()
         self._last_frame: Optional[np.ndarray] = None
+        self._main_win = "main"
+        self._loader_win = "loader"
 
     def set_frame(self, frame_bgr: np.ndarray) -> None:
         with self._lock:
@@ -39,6 +43,7 @@ class TrackerUI:
     def _ensure_texture(self, w: int, h: int) -> None:
         if self._texture_id is not None:
             return
+        self._tex_size = (int(w), int(h))
         with dpg.texture_registry(show=False):
             self._texture_id = dpg.add_dynamic_texture(
                 w, h, np.zeros((h, w, 3), dtype=np.float32).ravel(), tag="frame_tex"
@@ -49,11 +54,17 @@ class TrackerUI:
             frame = self._last_frame
         if frame is None:
             return
-        h, w = frame.shape[:2]
-        self._ensure_texture(w, h)
-        # BGR -> RGB and normalize to [0,1]
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        dpg.set_value("frame_tex", (rgb.astype(np.float32) / 255.0).ravel())
+        # Ensure texture (pre-sized once)
+        w_tex, h_tex = self._tex_size
+        self._ensure_texture(w_tex, h_tex)
+        # BGR -> RGB and normalize to [0,1]; resize to texture size
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if (rgb.shape[1], rgb.shape[0]) != (w_tex, h_tex):
+                rgb = cv2.resize(rgb, (w_tex, h_tex))
+            dpg.set_value("frame_tex", (rgb.astype(np.float32) / 255.0).ravel())
+        except Exception as e:
+            print(f"[UI] update_texture error: {e}")
 
     def save_config(self, path: str) -> None:
         p = Path(path)
@@ -107,11 +118,20 @@ class TrackerUI:
     def build(self) -> None:
         dpg.create_context()
         dpg.create_viewport(title="AimVal UI", width=1280, height=820)
-        with dpg.window(tag="main", label="AimVal", width=1280, height=820):
+        # Create texture upfront to avoid 'Texture not found'
+        self._ensure_texture(self._tex_size[0], self._tex_size[1])
+
+        # Loader window (shown first)
+        with dpg.window(tag=self._loader_win, label="Starting...", width=1280, height=820):
+            dpg.add_text("Finding OBS stream PC...")
+            dpg.add_loading_indicator()
+
+        # Main window hidden until first frame
+        with dpg.window(tag=self._main_win, label="AimVal", width=1280, height=820, show=False):
             # Viewer at top
             with dpg.group(horizontal=False):
                 dpg.add_text("Viewer")
-                dpg.add_image("frame_tex")
+                dpg.add_image("frame_tex", width=self._tex_size[0], height=self._tex_size[1])
             dpg.add_separator()
             # Config panel
             with dpg.collapsing_header(label="Config", default_open=True):
@@ -257,6 +277,20 @@ class TrackerUI:
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
+
+    def show_loader(self) -> None:
+        try:
+            dpg.configure_item(self._loader_win, show=True)
+            dpg.configure_item(self._main_win, show=False)
+        except Exception as e:
+            print(f"[UI] show_loader error: {e}")
+
+    def show_main(self) -> None:
+        try:
+            dpg.configure_item(self._loader_win, show=False)
+            dpg.configure_item(self._main_win, show=True)
+        except Exception as e:
+            print(f"[UI] show_main error: {e}")
 
     def render_loop(self) -> None:
         while dpg.is_dearpygui_running():
