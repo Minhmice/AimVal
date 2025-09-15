@@ -21,7 +21,9 @@ class UDPJPEGStream:
     - Yields only the latest complete frame to minimize latency
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080, rcvbuf_mb: int = 16) -> None:
+    def __init__(
+        self, host: str = "0.0.0.0", port: int = 8080, rcvbuf_mb: int = 16
+    ) -> None:
         self.host = host
         self.port = port
         self.rcvbuf_mb = max(1, int(rcvbuf_mb))
@@ -32,7 +34,9 @@ class UDPJPEGStream:
     def start(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.rcvbuf_mb * 1024 * 1024)
+            sock.setsockopt(
+                socket.SOL_SOCKET, socket.SO_RCVBUF, self.rcvbuf_mb * 1024 * 1024
+            )
         except OSError:
             pass
         sock.bind((self.host, self.port))
@@ -89,5 +93,3 @@ class UDPJPEGStream:
             if img is None:
                 continue
             yield img
-
-

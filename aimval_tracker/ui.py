@@ -25,7 +25,10 @@ from .config import (
 
 class TrackerUI:
     def __init__(
-        self, cfg: PipelineConfig, on_config_change: Callable[[PipelineConfig], None], on_apply_udp: Optional[Callable[[], None]] = None
+        self,
+        cfg: PipelineConfig,
+        on_config_change: Callable[[PipelineConfig], None],
+        on_apply_udp: Optional[Callable[[], None]] = None,
     ) -> None:
         self.cfg = cfg
         self.on_config_change = on_config_change
@@ -124,16 +127,22 @@ class TrackerUI:
         self._ensure_texture(self._tex_size[0], self._tex_size[1])
 
         # Loader window (shown first)
-        with dpg.window(tag=self._loader_win, label="Starting...", width=1280, height=820):
+        with dpg.window(
+            tag=self._loader_win, label="Starting...", width=1280, height=820
+        ):
             dpg.add_text("Finding OBS stream PC...", tag=self._loader_text_tag)
             dpg.add_loading_indicator()
 
         # Main window hidden until first frame
-        with dpg.window(tag=self._main_win, label="AimVal", width=1280, height=820, show=False):
+        with dpg.window(
+            tag=self._main_win, label="AimVal", width=1280, height=820, show=False
+        ):
             # Viewer at top
             with dpg.group(horizontal=False):
                 dpg.add_text("Viewer")
-                dpg.add_image("frame_tex", width=self._tex_size[0], height=self._tex_size[1])
+                dpg.add_image(
+                    "frame_tex", width=self._tex_size[0], height=self._tex_size[1]
+                )
             dpg.add_separator()
             # Config panel
             with dpg.collapsing_header(label="Config", default_open=True):
@@ -141,10 +150,26 @@ class TrackerUI:
                     # Stream
                     with dpg.child_window(width=300, height=260, border=True):
                         dpg.add_text("Stream (UDP)")
-                        dpg.add_input_text(label="Host", default_value=self.cfg.udp_host, callback=lambda s,a,u: self._set_udp_field("udp_host", a))
-                        dpg.add_input_int(label="Port", default_value=self.cfg.udp_port, callback=lambda s,a,u: self._set_udp_field("udp_port", a))
-                        dpg.add_input_int(label="RecvBuf MB", default_value=16, callback=lambda s,a,u: self._set_udp_field("rcvbuf_mb", a))
-                        dpg.add_button(label="Apply UDP (restart)", callback=self._apply_udp)
+                        dpg.add_input_text(
+                            label="Host",
+                            default_value=self.cfg.udp_host,
+                            callback=lambda s, a, u: self._set_udp_field("udp_host", a),
+                        )
+                        dpg.add_input_int(
+                            label="Port",
+                            default_value=self.cfg.udp_port,
+                            callback=lambda s, a, u: self._set_udp_field("udp_port", a),
+                        )
+                        dpg.add_input_int(
+                            label="RecvBuf MB",
+                            default_value=16,
+                            callback=lambda s, a, u: self._set_udp_field(
+                                "rcvbuf_mb", a
+                            ),
+                        )
+                        dpg.add_button(
+                            label="Apply UDP (restart)", callback=self._apply_udp
+                        )
                     # HSV
                     with dpg.child_window(width=300, height=260, border=True):
                         dpg.add_text("HSV")
@@ -312,6 +337,12 @@ class TrackerUI:
             self.update_texture()
             dpg.render_dearpygui_frame()
         dpg.destroy_context()
+
+    def render_step(self) -> None:
+        """Render one DearPyGui frame (non-blocking helper for main thread)."""
+        if dpg.is_dearpygui_running():
+            self.update_texture()
+            dpg.render_dearpygui_frame()
 
     # Update helpers
     def _update_hsv(self, field: str, value: int) -> None:

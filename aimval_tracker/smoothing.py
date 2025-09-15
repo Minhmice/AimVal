@@ -25,7 +25,9 @@ class EMASmoother:
             self._last = (a * x + (1 - a) * lx, a * y + (1 - a) * ly)
         return self._last
 
-    def step_delta(self, current: Tuple[float, float], target: Tuple[float, float]) -> Tuple[int, int]:
+    def step_delta(
+        self, current: Tuple[float, float], target: Tuple[float, float]
+    ) -> Tuple[int, int]:
         cx, cy = current
         tx, ty = target
         dx = tx - cx
@@ -49,5 +51,3 @@ class EMASmoother:
             dy = -max_step
 
         return int(round(dx)), int(round(dy))
-
-

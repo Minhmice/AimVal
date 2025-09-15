@@ -49,5 +49,3 @@ class MakcuAsyncController:
         if self._ctrl is None:
             return
         await self._ctrl.click(button)
-
-

@@ -12,7 +12,9 @@ class LinearMapper:
     def __init__(self, cfg: MappingConfig) -> None:
         self.cfg = cfg
 
-    def map_point(self, pt_img: Tuple[int, int], img_size: Tuple[int, int]) -> Tuple[int, int]:
+    def map_point(
+        self, pt_img: Tuple[int, int], img_size: Tuple[int, int]
+    ) -> Tuple[int, int]:
         x, y = pt_img
         w_img, h_img = img_size
         w_scr, h_scr = self.cfg.screen_size
@@ -32,11 +34,11 @@ class HomographyMapper:
         if self.H is None:
             raise ValueError("Failed to compute homography matrix")
 
-    def map_point(self, pt_img: Tuple[int, int], img_size: Tuple[int, int]) -> Tuple[int, int]:
+    def map_point(
+        self, pt_img: Tuple[int, int], img_size: Tuple[int, int]
+    ) -> Tuple[int, int]:
         x, y = pt_img
         p = np.array([[x, y, 1.0]], dtype=np.float32).T
         q = self.H @ p
-        q /= (q[2, 0] + 1e-6)
+        q /= q[2, 0] + 1e-6
         return int(q[0, 0]), int(q[1, 0])
-
-

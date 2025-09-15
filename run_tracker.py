@@ -70,7 +70,12 @@ def parse_args() -> argparse.Namespace:
     # Overlay / display
     p.add_argument("--overlay", action="store_true")
     p.add_argument("--scale", type=float, default=1.0)
-    p.add_argument("--log-level", type=str, default="warn", choices=["error","warn","info","debug"])
+    p.add_argument(
+        "--log-level",
+        type=str,
+        default="warn",
+        choices=["error", "warn", "info", "debug"],
+    )
     return p.parse_args()
 
 
@@ -148,11 +153,13 @@ def build_config(ns: argparse.Namespace) -> PipelineConfig:
 
 
 def _should_log(ns_level: str, msg_level: str) -> bool:
-    levels = {"error":40, "warn":30, "info":20, "debug":10}
+    levels = {"error": 40, "warn": 30, "info": 20, "debug": 10}
     return levels.get(msg_level, 20) >= levels.get(ns_level, 30)
 
 
-async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None) -> None:
+async def run_pipeline(
+    cfg: PipelineConfig, ns: argparse.Namespace | None = None
+) -> None:
     # Use udp_viewer_2 receiver for frames
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -170,7 +177,9 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
         print(f"[ERROR] UDP bind failed on {cfg.udp_host}:{cfg.udp_port} - {e}")
         ui_temp = TrackerUI(cfg, lambda c: None)
         try:
-            ui_temp.set_loader_text(f"Port {cfg.udp_port} in use. Close other app or change port.")
+            ui_temp.set_loader_text(
+                f"Port {cfg.udp_port} in use. Close other app or change port."
+            )
         except Exception:
             pass
         raise
@@ -214,7 +223,9 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
     def restart_udp():
         nonlocal sock, store, recv_thread
         try:
-            print(f"[INFO] Restarting UDP on {state['cfg'].udp_host}:{state['cfg'].udp_port}")
+            print(
+                f"[INFO] Restarting UDP on {state['cfg'].udp_host}:{state['cfg'].udp_port}"
+            )
             recv_thread.stop()
             recv_thread.join(timeout=1.0)
             sock.close()
@@ -283,10 +294,10 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
                     except Exception as e:
                         print(f"[UI] show_main failed: {e}")
 
-            timer.tick()
-            h, w = frame.shape[:2]
+                timer.tick()
+                h, w = frame.shape[:2]
 
-            centroid, mask_bgr, roi_rect = state["tracker"].process(frame)
+                centroid, mask_bgr, roi_rect = state["tracker"].process(frame)
             if centroid is None and (ns is None or _should_log(ns.log_level, "debug")):
                 print("[DEBUG] No target found in frame")
 
@@ -312,7 +323,14 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
             # Prepare visualization
             disp = frame
             if cfg.show_overlay:
-                disp = draw_overlay(disp, centroid, target_scr, roi_rect, timer, show_box=state["cfg"].show_box)
+                disp = draw_overlay(
+                    disp,
+                    centroid,
+                    target_scr,
+                    roi_rect,
+                    timer,
+                    show_box=state["cfg"].show_box,
+                )
                 # Small debug mask inset
                 try:
                     mask_small = cv2.resize(mask_bgr, (w // 4, h // 4))
@@ -337,15 +355,24 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
                 dx, dy = state["smoother"].step_delta(est, smoothed)
                 await ctrl.move_delta(dx, dy)
             else:
-                if (ns is None or _should_log(ns.log_level, "info")) and not state["cfg"].aimbot:
+                if (ns is None or _should_log(ns.log_level, "info")) and not state[
+                    "cfg"
+                ].aimbot:
                     print("[INFO] aimbot off; not moving")
-                if (ns is None or _should_log(ns.log_level, "debug")) and target_scr is None:
+                if (
+                    ns is None or _should_log(ns.log_level, "debug")
+                ) and target_scr is None:
                     print("[DEBUG] target_scr None; not moving")
                 # No target or disabled control: keep smoother state but don't move
                 state["smoother"].smooth(None)
 
-                # Send frame to UI viewer (top area)
+                # Send frame to UI viewer (top area) and step UI once (reduces chance of UI freeze)
                 ui.set_frame(disp)
+                try:
+                    ui.render_step()
+                except Exception as e:
+                    if ns is None or _should_log(ns.log_level, "warn"):
+                        print(f"[UI] render_step error: {e}")
         except asyncio.CancelledError:
             if ns is None or _should_log(ns.log_level, "info"):
                 print("[INFO] Run loop cancelled; shutting down...")
