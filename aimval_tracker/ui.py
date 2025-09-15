@@ -37,7 +37,8 @@ class TrackerUI:
         self._tex_size = (1280, 720)
         self._lock = threading.Lock()
         self._last_frame: Optional[np.ndarray] = None
-        self._main_win = "main"
+        self._viewer_win = "viewer_win"
+        self._config_win = "config_win"
         self._loader_win = "loader"
         self._loader_text_tag = "loader_text"
         self._actions: list[tuple[str, tuple, dict]] = []
@@ -123,203 +124,203 @@ class TrackerUI:
 
     def build(self) -> None:
         dpg.create_context()
-        dpg.create_viewport(title="AimVal UI", width=1280, height=820)
+        dpg.create_viewport(title="AimVal UI", width=1500, height=900)
         # Create texture upfront to avoid 'Texture not found'
         self._ensure_texture(self._tex_size[0], self._tex_size[1])
 
         # Loader window (shown first)
         with dpg.window(
-            tag=self._loader_win, label="Starting...", width=1280, height=820
+            tag=self._loader_win, label="Starting...", width=600, height=120, pos=(50, 50)
         ):
             dpg.add_text("Finding OBS stream PC...", tag=self._loader_text_tag)
             dpg.add_loading_indicator()
 
-        # Main window hidden until first frame
+        # Separate windows (hidden until first frame)
         with dpg.window(
-            tag=self._main_win, label="AimVal", width=1280, height=820, show=False
+            tag=self._viewer_win, label="AimVal Viewer", width=960, height=720, pos=(20, 20), show=False
         ):
-            # Viewer at top
-            with dpg.group(horizontal=False):
-                dpg.add_text("Viewer")
-                dpg.add_image(
-                    "frame_tex", width=self._tex_size[0], height=self._tex_size[1]
-                )
-            dpg.add_separator()
-            # Config panel
+            dpg.add_image(
+                "frame_tex", width=self._tex_size[0], height=self._tex_size[1]
+            )
+
+        with dpg.window(
+            tag=self._config_win, label="AimVal Config", width=480, height=820, pos=(1010, 20), show=False
+        ):
             with dpg.collapsing_header(label="Config", default_open=True):
-                with dpg.group(horizontal=True):
-                    # Stream
-                    with dpg.child_window(width=300, height=260, border=True):
-                        dpg.add_text("Stream (UDP)")
-                        dpg.add_input_text(
-                            label="Host",
-                            default_value=self.cfg.udp_host,
-                            callback=lambda s, a, u: self._set_udp_field("udp_host", a),
-                        )
-                        dpg.add_input_int(
-                            label="Port",
-                            default_value=self.cfg.udp_port,
-                            callback=lambda s, a, u: self._set_udp_field("udp_port", a),
-                        )
-                        dpg.add_input_int(
-                            label="RecvBuf MB",
-                            default_value=16,
-                            callback=lambda s, a, u: self._set_udp_field(
-                                "rcvbuf_mb", a
-                            ),
-                        )
-                        dpg.add_button(
-                            label="Apply UDP (restart)", callback=self._apply_udp
-                        )
-                    # HSV
-                    with dpg.child_window(width=300, height=260, border=True):
-                        dpg.add_text("HSV")
-                        hv = self.cfg.tracker.hsv
-                        dpg.add_input_int(
-                            label="H low",
-                            default_value=hv.h_low,
-                            callback=lambda s, a, u: self._update_hsv("h_low", a),
-                        )
-                        dpg.add_input_int(
-                            label="H high",
-                            default_value=hv.h_high,
-                            callback=lambda s, a, u: self._update_hsv("h_high", a),
-                        )
-                        dpg.add_input_int(
-                            label="S low",
-                            default_value=hv.s_low,
-                            callback=lambda s, a, u: self._update_hsv("s_low", a),
-                        )
-                        dpg.add_input_int(
-                            label="V low",
-                            default_value=hv.v_low,
-                            callback=lambda s, a, u: self._update_hsv("v_low", a),
-                        )
-                        dpg.add_input_int(
-                            label="S high",
-                            default_value=hv.s_high,
-                            callback=lambda s, a, u: self._update_hsv("s_high", a),
-                        )
-                        dpg.add_input_int(
-                            label="V high",
-                            default_value=hv.v_high,
-                            callback=lambda s, a, u: self._update_hsv("v_high", a),
-                        )
-                        dpg.add_combo(
-                            label="Target",
-                            items=["centroid", "topmost", "bbox_topcenter"],
-                            default_value=self.cfg.tracker.target_mode,
-                            callback=lambda s, a, u: self._set_target(a),
-                        )
-                    # ROI / Mapping
-                    with dpg.child_window(width=300, height=260, border=True):
-                        dpg.add_text("ROI & Mapping")
-                        r = self.cfg.tracker.roi
-                        dpg.add_checkbox(
-                            label="Use ROI",
-                            default_value=self.cfg.tracker.use_roi,
-                            callback=lambda s, a, u: self._set_use_roi(a),
-                        )
-                        dpg.add_input_int(
-                            label="ROI x",
-                            default_value=r.x,
-                            callback=lambda s, a, u: self._set_roi_field("x", a),
-                        )
-                        dpg.add_input_int(
-                            label="ROI y",
-                            default_value=r.y,
-                            callback=lambda s, a, u: self._set_roi_field("y", a),
-                        )
-                        dpg.add_input_int(
-                            label="ROI w",
-                            default_value=r.w or 0,
-                            callback=lambda s, a, u: self._set_roi_field("w", a),
-                        )
-                        dpg.add_input_int(
-                            label="ROI h",
-                            default_value=r.h or 0,
-                            callback=lambda s, a, u: self._set_roi_field("h", a),
-                        )
-                        dpg.add_combo(
-                            label="Mapping",
-                            items=["linear", "homography"],
-                            default_value=self.cfg.mapping.method,
-                            callback=lambda s, a, u: self._set_mapping(a),
-                        )
-                        dpg.add_input_text(
-                            label="Screen (WxH)",
-                            default_value=f"{self.cfg.mapping.screen_size[0]}x{self.cfg.mapping.screen_size[1]}",
-                            callback=lambda s, a, u: self._set_screen(a),
-                        )
-                    # Smoothing / Controller
-                    with dpg.child_window(width=300, height=260, border=True):
-                        dpg.add_text("Smoothing & Control")
-                        dpg.add_input_float(
-                            label="EMA alpha",
-                            default_value=self.cfg.smoothing.ema_alpha,
-                            callback=lambda s, a, u: self._set_smooth("ema_alpha", a),
-                        )
-                        dpg.add_input_int(
-                            label="Deadzone px",
-                            default_value=self.cfg.smoothing.deadzone_px,
-                            callback=lambda s, a, u: self._set_smooth("deadzone_px", a),
-                        )
-                        dpg.add_input_int(
-                            label="Max step px",
-                            default_value=self.cfg.smoothing.max_step_px,
-                            callback=lambda s, a, u: self._set_smooth("max_step_px", a),
-                        )
-                        dpg.add_checkbox(
-                            label="Overlay",
-                            default_value=self.cfg.show_overlay,
-                            callback=lambda s, a, u: self._set_overlay(a),
-                        )
-                        dpg.add_input_float(
-                            label="Display scale",
-                            default_value=self.cfg.display_scale,
-                            callback=lambda s, a, u: self._set_scale(a),
-                        )
-                        dpg.add_checkbox(
-                            label="Aimbot (enable control)",
-                            default_value=self.cfg.aimbot,
-                            callback=lambda s, a, u: self._set_aimbot(a),
-                        )
-                        dpg.add_checkbox(
-                            label="Box (draw square)",
-                            default_value=self.cfg.show_box,
-                            callback=lambda s, a, u: self._set_box(a),
-                        )
-                    # Save/Load
-                    with dpg.child_window(width=300, height=260, border=True):
-                        dpg.add_text("Preset")
-                        dpg.add_input_text(
-                            label="File",
-                            default_value="aimval_config.json",
-                            tag="cfg_path",
-                        )
-                        dpg.add_button(
-                            label="Save",
-                            callback=lambda: self.save_config(
-                                dpg.get_value("cfg_path")
-                            ),
-                        )
-                        dpg.add_button(
-                            label="Load",
-                            callback=lambda: self.load_config(
-                                dpg.get_value("cfg_path")
-                            ),
-                        )
+                # Stream
+                with dpg.child_window(width=-1, height=190, border=True):
+                    dpg.add_text("Stream (UDP)")
+                    dpg.add_input_text(
+                        label="Host",
+                        default_value=self.cfg.udp_host,
+                        callback=lambda s, a, u: self._set_udp_field("udp_host", a),
+                    )
+                    dpg.add_input_int(
+                        label="Port",
+                        default_value=self.cfg.udp_port,
+                        callback=lambda s, a, u: self._set_udp_field("udp_port", a),
+                    )
+                    dpg.add_input_int(
+                        label="RecvBuf MB",
+                        default_value=16,
+                        callback=lambda s, a, u: self._set_udp_field(
+                            "rcvbuf_mb", a
+                        ),
+                    )
+                    dpg.add_button(
+                        label="Apply UDP (restart)", callback=self._apply_udp
+                    )
+                # HSV
+                with dpg.child_window(width=-1, height=260, border=True):
+                    dpg.add_text("HSV")
+                    hv = self.cfg.tracker.hsv
+                    dpg.add_input_int(
+                        label="H low",
+                        default_value=hv.h_low,
+                        callback=lambda s, a, u: self._update_hsv("h_low", a),
+                    )
+                    dpg.add_input_int(
+                        label="H high",
+                        default_value=hv.h_high,
+                        callback=lambda s, a, u: self._update_hsv("h_high", a),
+                    )
+                    dpg.add_input_int(
+                        label="S low",
+                        default_value=hv.s_low,
+                        callback=lambda s, a, u: self._update_hsv("s_low", a),
+                    )
+                    dpg.add_input_int(
+                        label="V low",
+                        default_value=hv.v_low,
+                        callback=lambda s, a, u: self._update_hsv("v_low", a),
+                    )
+                    dpg.add_input_int(
+                        label="S high",
+                        default_value=hv.s_high,
+                        callback=lambda s, a, u: self._update_hsv("s_high", a),
+                    )
+                    dpg.add_input_int(
+                        label="V high",
+                        default_value=hv.v_high,
+                        callback=lambda s, a, u: self._update_hsv("v_high", a),
+                    )
+                    dpg.add_combo(
+                        label="Target",
+                        items=["centroid", "topmost", "bbox_topcenter"],
+                        default_value=self.cfg.tracker.target_mode,
+                        callback=lambda s, a, u: self._set_target(a),
+                    )
+                # ROI / Mapping
+                with dpg.child_window(width=-1, height=220, border=True):
+                    dpg.add_text("ROI & Mapping")
+                    r = self.cfg.tracker.roi
+                    dpg.add_checkbox(
+                        label="Use ROI",
+                        default_value=self.cfg.tracker.use_roi,
+                        callback=lambda s, a, u: self._set_use_roi(a),
+                    )
+                    dpg.add_input_int(
+                        label="ROI x",
+                        default_value=r.x,
+                        callback=lambda s, a, u: self._set_roi_field("x", a),
+                    )
+                    dpg.add_input_int(
+                        label="ROI y",
+                        default_value=r.y,
+                        callback=lambda s, a, u: self._set_roi_field("y", a),
+                    )
+                    dpg.add_input_int(
+                        label="ROI w",
+                        default_value=r.w or 0,
+                        callback=lambda s, a, u: self._set_roi_field("w", a),
+                    )
+                    dpg.add_input_int(
+                        label="ROI h",
+                        default_value=r.h or 0,
+                        callback=lambda s, a, u: self._set_roi_field("h", a),
+                    )
+                    dpg.add_combo(
+                        label="Mapping",
+                        items=["linear", "homography"],
+                        default_value=self.cfg.mapping.method,
+                        callback=lambda s, a, u: self._set_mapping(a),
+                    )
+                    dpg.add_input_text(
+                        label="Screen (WxH)",
+                        default_value=f"{self.cfg.mapping.screen_size[0]}x{self.cfg.mapping.screen_size[1]}",
+                        callback=lambda s, a, u: self._set_screen(a),
+                    )
+                # Smoothing / Control
+                with dpg.child_window(width=-1, height=220, border=True):
+                    dpg.add_text("Smoothing & Control")
+                    dpg.add_input_float(
+                        label="EMA alpha",
+                        default_value=self.cfg.smoothing.ema_alpha,
+                        callback=lambda s, a, u: self._set_smooth("ema_alpha", a),
+                    )
+                    dpg.add_input_int(
+                        label="Deadzone px",
+                        default_value=self.cfg.smoothing.deadzone_px,
+                        callback=lambda s, a, u: self._set_smooth("deadzone_px", a),
+                    )
+                    dpg.add_input_int(
+                        label="Max step px",
+                        default_value=self.cfg.smoothing.max_step_px,
+                        callback=lambda s, a, u: self._set_smooth("max_step_px", a),
+                    )
+                    dpg.add_checkbox(
+                        label="Overlay",
+                        default_value=self.cfg.show_overlay,
+                        callback=lambda s, a, u: self._set_overlay(a),
+                    )
+                    dpg.add_input_float(
+                        label="Display scale",
+                        default_value=self.cfg.display_scale,
+                        callback=lambda s, a, u: self._set_scale(a),
+                    )
+                    dpg.add_checkbox(
+                        label="Aimbot (enable control)",
+                        default_value=self.cfg.aimbot,
+                        callback=lambda s, a, u: self._set_aimbot(a),
+                    )
+                    dpg.add_checkbox(
+                        label="Box (draw square)",
+                        default_value=self.cfg.show_box,
+                        callback=lambda s, a, u: self._set_box(a),
+                    )
+                # Preset
+                with dpg.child_window(width=-1, height=140, border=True):
+                    dpg.add_text("Preset")
+                    dpg.add_input_text(
+                        label="File",
+                        default_value="aimval_config.json",
+                        tag="cfg_path",
+                    )
+                    dpg.add_button(
+                        label="Save",
+                        callback=lambda: self.save_config(
+                            dpg.get_value("cfg_path")
+                        ),
+                    )
+                    dpg.add_button(
+                        label="Load",
+                        callback=lambda: self.load_config(
+                            dpg.get_value("cfg_path")
+                        ),
+                    )
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
 
     def _do_show_loader(self) -> None:
         dpg.configure_item(self._loader_win, show=True)
-        dpg.configure_item(self._main_win, show=False)
+        dpg.configure_item(self._viewer_win, show=False)
+        dpg.configure_item(self._config_win, show=False)
 
     def _do_show_main(self) -> None:
         dpg.configure_item(self._loader_win, show=False)
-        dpg.configure_item(self._main_win, show=True)
+        dpg.configure_item(self._viewer_win, show=True)
+        dpg.configure_item(self._config_win, show=True)
 
     def _do_set_loader_text(self, msg: str) -> None:
         dpg.set_value(self._loader_text_tag, msg)
