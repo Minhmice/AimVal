@@ -25,10 +25,11 @@ from .config import (
 
 class TrackerUI:
     def __init__(
-        self, cfg: PipelineConfig, on_config_change: Callable[[PipelineConfig], None]
+        self, cfg: PipelineConfig, on_config_change: Callable[[PipelineConfig], None], on_apply_udp: Optional[Callable[[], None]] = None
     ) -> None:
         self.cfg = cfg
         self.on_config_change = on_config_change
+        self._on_apply_udp = on_apply_udp
         self._texture_id = None
         self._tex_size = (1280, 720)
         self._lock = threading.Lock()
@@ -136,6 +137,13 @@ class TrackerUI:
             # Config panel
             with dpg.collapsing_header(label="Config", default_open=True):
                 with dpg.group(horizontal=True):
+                    # Stream
+                    with dpg.child_window(width=300, height=260, border=True):
+                        dpg.add_text("Stream (UDP)")
+                        dpg.add_input_text(label="Host", default_value=self.cfg.udp_host, callback=lambda s,a,u: self._set_udp_field("udp_host", a))
+                        dpg.add_input_int(label="Port", default_value=self.cfg.udp_port, callback=lambda s,a,u: self._set_udp_field("udp_port", a))
+                        dpg.add_input_int(label="RecvBuf MB", default_value=16, callback=lambda s,a,u: self._set_udp_field("rcvbuf_mb", a))
+                        dpg.add_button(label="Apply UDP (restart)", callback=self._apply_udp)
                     # HSV
                     with dpg.child_window(width=300, height=260, border=True):
                         dpg.add_text("HSV")
@@ -353,3 +361,21 @@ class TrackerUI:
     def _set_box(self, value: bool) -> None:
         self.cfg.show_box = bool(value)
         self.on_config_change(self.cfg)
+
+    # Stream helpers
+    def _set_udp_field(self, field: str, value) -> None:
+        if field == "udp_port":
+            self.cfg.udp_port = int(value)
+        elif field == "udp_host":
+            self.cfg.udp_host = str(value)
+        else:
+            # rcvbuf_mb saved transiently via controller state; ignore persist
+            pass
+        self.on_config_change(self.cfg)
+
+    def _apply_udp(self) -> None:
+        if self._on_apply_udp is not None:
+            try:
+                self._on_apply_udp()
+            except Exception as e:
+                print(f"[UI] apply_udp error: {e}")

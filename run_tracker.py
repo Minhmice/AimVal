@@ -197,7 +197,27 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
             state["mapper"] = LinearMapper(new_cfg.mapping)
         state["smoother"] = EMASmoother(new_cfg.smoothing)
 
-    ui = TrackerUI(cfg, on_config_change)
+    def restart_udp():
+        nonlocal sock, store, recv_thread
+        try:
+            print(f"[INFO] Restarting UDP on {state['cfg'].udp_host}:{state['cfg'].udp_port}")
+            recv_thread.stop()
+            recv_thread.join(timeout=1.0)
+            sock.close()
+        except Exception:
+            pass
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
+        except OSError:
+            pass
+        sock.bind((state["cfg"].udp_host, int(state["cfg"].udp_port)))
+        sock.setblocking(False)
+        store = uv2.FrameBuffer()
+        recv_thread = uv2.ReceiverThread(sock, 64 * 1024 * 1024, store)
+        recv_thread.start()
+
+    ui = TrackerUI(cfg, on_config_change, on_apply_udp=restart_udp)
     ui.build()
     ui.show_loader()
     threading.Thread(target=ui.render_loop, daemon=True).start()
@@ -218,27 +238,28 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
                 jpeg_decoder = None
                 use_turbo = False
 
-        while True:
-            buf = store.get_latest()
-            if buf is None:
-                await asyncio.sleep(0.001)
-                continue
-            t0 = time.monotonic_ns()
-            if use_turbo and jpeg_decoder is not None:
-                try:
-                    frame = jpeg_decoder.decode(buf)
-                except Exception:
+        try:
+            while True:
+                buf = store.get_latest()
+                if buf is None:
+                    await asyncio.sleep(0.001)
+                    continue
+                t0 = time.monotonic_ns()
+                if use_turbo and jpeg_decoder is not None:
+                    try:
+                        frame = jpeg_decoder.decode(buf)
+                    except Exception:
+                        frame = uv2.decode_jpeg_cv2(buf)
+                else:
                     frame = uv2.decode_jpeg_cv2(buf)
-            else:
-                frame = uv2.decode_jpeg_cv2(buf)
-            if frame is None:
-                continue
-            # first frame -> switch UI to main
-            if ns is None or _should_log(ns.log_level, "info"):
-                try:
-                    ui.show_main()
-                except Exception as e:
-                    print(f"[UI] show_main failed: {e}")
+                if frame is None:
+                    continue
+                # first frame -> switch UI to main
+                if ns is None or _should_log(ns.log_level, "info"):
+                    try:
+                        ui.show_main()
+                    except Exception as e:
+                        print(f"[UI] show_main failed: {e}")
 
             timer.tick()
             h, w = frame.shape[:2]
@@ -301,21 +322,32 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
                 # No target or disabled control: keep smoother state but don't move
                 state["smoother"].smooth(None)
 
-            # Send frame to UI viewer (top area)
-            ui.set_frame(disp)
-
-    # Cleanup
-    try:
-        recv_thread.stop()
-        recv_thread.join(timeout=1.0)
-    finally:
-        sock.close()
+                # Send frame to UI viewer (top area)
+                ui.set_frame(disp)
+        except asyncio.CancelledError:
+            if ns is None or _should_log(ns.log_level, "info"):
+                print("[INFO] Run loop cancelled; shutting down...")
+        finally:
+            # Cleanup
+            try:
+                recv_thread.stop()
+                recv_thread.join(timeout=1.0)
+            except Exception:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def main() -> None:
     args = parse_args()
     cfg = build_config(args)
-    asyncio.run(run_pipeline(cfg, args))
+    try:
+        asyncio.run(run_pipeline(cfg, args))
+    except KeyboardInterrupt:
+        if _should_log(args.log_level, "info"):
+            print("[INFO] Interrupted by user")
 
 
 if __name__ == "__main__":
