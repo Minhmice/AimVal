@@ -70,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     # Overlay / display
     p.add_argument("--overlay", action="store_true")
     p.add_argument("--scale", type=float, default=1.0)
+    p.add_argument("--log-level", type=str, default="warn", choices=["error","warn","info","debug"])
     return p.parse_args()
 
 
@@ -146,7 +147,12 @@ def build_config(ns: argparse.Namespace) -> PipelineConfig:
     return cfg
 
 
-async def run_pipeline(cfg: PipelineConfig) -> None:
+def _should_log(ns_level: str, msg_level: str) -> bool:
+    levels = {"error":40, "warn":30, "info":20, "debug":10}
+    return levels.get(msg_level, 20) >= levels.get(ns_level, 30)
+
+
+async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None) -> None:
     # Use udp_viewer_2 receiver for frames
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -228,16 +234,17 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
             if frame is None:
                 continue
             # first frame -> switch UI to main
-            try:
-                ui.show_main()
-            except Exception as e:
-                print(f"[UI] show_main failed: {e}")
+            if ns is None or _should_log(ns.log_level, "info"):
+                try:
+                    ui.show_main()
+                except Exception as e:
+                    print(f"[UI] show_main failed: {e}")
 
             timer.tick()
             h, w = frame.shape[:2]
 
             centroid, mask_bgr, roi_rect = state["tracker"].process(frame)
-            if centroid is None:
+            if centroid is None and (ns is None or _should_log(ns.log_level, "debug")):
                 print("[DEBUG] No target found in frame")
 
             target_scr: Optional[Tuple[int, int]] = None
@@ -256,7 +263,8 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
                 x_scr, y_scr = mapper_obj.map_point(centroid, (w, h))
                 target_scr = (x_scr, y_scr)
             else:
-                print("[DEBUG] centroid None; skip mapping")
+                if ns is None or _should_log(ns.log_level, "debug"):
+                    print("[DEBUG] centroid None; skip mapping")
 
             # Prepare visualization
             disp = frame
@@ -286,9 +294,9 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
                 dx, dy = state["smoother"].step_delta(est, smoothed)
                 await ctrl.move_delta(dx, dy)
             else:
-                if not state["cfg"].aimbot:
-                    print("[DEBUG] aimbot off; not moving")
-                if target_scr is None:
+                if (ns is None or _should_log(ns.log_level, "info")) and not state["cfg"].aimbot:
+                    print("[INFO] aimbot off; not moving")
+                if (ns is None or _should_log(ns.log_level, "debug")) and target_scr is None:
                     print("[DEBUG] target_scr None; not moving")
                 # No target or disabled control: keep smoother state but don't move
                 state["smoother"].smooth(None)
@@ -307,7 +315,7 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
 def main() -> None:
     args = parse_args()
     cfg = build_config(args)
-    asyncio.run(run_pipeline(cfg))
+    asyncio.run(run_pipeline(cfg, args))
 
 
 if __name__ == "__main__":
