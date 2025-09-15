@@ -21,6 +21,7 @@ import signal
 from typing import Optional
 import argparse
 import select
+import time
 
 import cv2
 import numpy as np
@@ -32,6 +33,16 @@ PORT: int = 8080
 SOI: bytes = b"\xff\xd8"  # JPEG Start Of Image
 EOI: bytes = b"\xff\xd9"  # JPEG End Of Image
 WINDOW_NAME: str = "UDP Stream"
+
+# Simple log levels
+_LOG_LEVELS = {"error": 40, "warn": 30, "info": 20, "debug": 10}
+_current_log_level = _LOG_LEVELS["info"]
+
+
+def log(level: str, msg: str) -> None:
+    lvl = _LOG_LEVELS.get(level, 20)
+    if lvl >= _current_log_level:
+        print(f"[{level.upper()}] {msg}")
 
 
 def can_use_gui() -> bool:
@@ -81,6 +92,42 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force headless mode even if a display is available",
     )
+    parser.add_argument(
+        "--no-metrics",
+        action="store_true",
+        help="Disable on-screen timing metrics overlay",
+    )
+    parser.add_argument(
+        "--rcvbuf-mb",
+        type=int,
+        default=16,
+        help="UDP socket receive buffer size in MB (default: 16)",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="info",
+        choices=list(_LOG_LEVELS.keys()),
+        help="Logging level (error, warn, info, debug)",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="Display scale factor (e.g., 0.5 to halve size; writer uses original)",
+    )
+    parser.add_argument(
+        "--cv-threads",
+        type=int,
+        default=0,
+        help="Set OpenCV thread count (>0 to override)",
+    )
+    parser.add_argument(
+        "--max-display-fps",
+        type=float,
+        default=0.0,
+        help="Cap display refresh FPS (0 = unlimited)",
+    )
     return parser.parse_args()
 
 
@@ -99,17 +146,32 @@ def pick_fourcc(path: str, override: Optional[str]) -> int:
 
 
 def main() -> None:
+    global _current_log_level
     args = parse_args()
+    _current_log_level = _LOG_LEVELS.get(args.log_level, 20)
+
+    if args.cv_threads and args.cv_threads > 0:
+        try:
+            cv2.setNumThreads(int(args.cv_threads))
+            cv2.setUseOptimized(True)
+            log("info", f"OpenCV threads set to {args.cv_threads}")
+        except Exception as e:
+            log("warn", f"Failed to set OpenCV threads: {e}")
+
     # Initial log line required by spec
-    print(f"[INFO] Listening on udp://{HOST}:{PORT}")
+    log("info", f"Listening on udp://{HOST}:{PORT}")
 
     # Prepare UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # Bump receive buffer to better handle bursty UDP
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+    rcvbuf_bytes = max(1, args.rcvbuf_mb) * 1024 * 1024
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf_bytes)
+    except OSError:
+        pass
     sock.bind((HOST, PORT))
     sock.setblocking(False)  # non-blocking for low latency
-    print("[INFO] Socket configured: non-blocking, rcvbuf=4MB")
+    log("info", f"Socket configured: non-blocking, rcvbuf~{rcvbuf_bytes//(1024*1024)}MB")
 
     # Choose output mode based on environment
     gui_mode = can_use_gui() and not args.no_gui
@@ -128,11 +190,20 @@ def main() -> None:
     # Rolling buffer accumulates UDP payloads until complete JPEG is found
     buffer = bytearray()
     max_buffer_bytes = 64 * 1024 * 1024  # safety cap to avoid unbounded growth
-    print(f"[INFO] Max buffer size set to {max_buffer_bytes//(1024*1024)}MB")
+    log("info", f"Max buffer size set to {max_buffer_bytes//(1024*1024)}MB")
 
     writer: Optional[cv2.VideoWriter] = None
     out_path = args.record
     target_fps = max(1.0, float(args.fps))
+
+    # Metrics
+    show_metrics = not args.no_metrics
+    prev_display_ns: Optional[int] = None
+    last_show_ns: Optional[int] = None
+    min_show_interval_ns = 0
+    if args.max_display_fps and args.max_display_fps > 0:
+        min_show_interval_ns = int(1e9 / float(args.max_display_fps))
+        log("info", f"Cap display to {args.max_display_fps} FPS")
 
     try:
         while not stop:
@@ -149,8 +220,8 @@ def main() -> None:
                 except BlockingIOError:
                     break
                 rlist, _, _ = select.select([sock], [], [], 0.0)
-            if packets:
-                print(f"[DBG] recv packets={packets}, bytes={bytes_in}, buffer_len={len(buffer)}")
+            if packets and _current_log_level <= _LOG_LEVELS["debug"]:
+                log("debug", f"recv packets={packets}, bytes={bytes_in}, buffer_len={len(buffer)}")
 
             # 2) Extract frames; keep only most recent to minimize latency
             latest_frame_bytes: Optional[bytes] = None
@@ -160,7 +231,7 @@ def main() -> None:
                 if start == -1:
                     # No start marker present; periodically prune oversized buffer
                     if len(buffer) > max_buffer_bytes:
-                        print("[WARN] Buffer oversized without SOI, clearing")
+                        log("warn", "Buffer oversized without SOI, clearing")
                         buffer.clear()
                     break
 
@@ -169,7 +240,7 @@ def main() -> None:
                     # Incomplete frame so far; optionally prune old data
                     if len(buffer) > max_buffer_bytes:
                         # keep last 2MB hoping it contains SOI of next frame
-                        print("[WARN] Buffer oversized with incomplete frame, trimming tail to 2MB")
+                        log("warn", "Buffer oversized with incomplete frame, trimming tail to 2MB")
                         buffer[:] = buffer[-(2 * 1024 * 1024) :]
                     break
 
@@ -179,27 +250,40 @@ def main() -> None:
                 # Discard consumed bytes up to end marker
                 del buffer[: end + 2]
 
-            if frames_found > 1:
-                print(f"[DBG] dropped {frames_found-1} older frames; decoding latest only")
+            if frames_found > 1 and _current_log_level <= _LOG_LEVELS["debug"]:
+                log("debug", f"dropped {frames_found-1} older frames; decoding latest only")
 
             if latest_frame_bytes is None:
                 # No complete frame yet; continue receiving
                 continue
 
             # 3) Decode only the latest frame to minimize latency
+            decode_start_ns = time.monotonic_ns()
             frame = decode_jpeg(latest_frame_bytes)
             if frame is None:
-                print("[WARN] Failed to decode JPEG frame")
+                log("warn", "Failed to decode JPEG frame")
                 continue
+            decode_ms = (time.monotonic_ns() - decode_start_ns) / 1e6
 
             # Create window lazily
             if gui_mode and not window_created:
                 try:
                     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-                    print("[INFO] Window created on first frame")
+                    # Ensure window is not fullscreen to avoid cursor issues
+                    try:
+                        cv2.setWindowProperty(
+                            WINDOW_NAME, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL
+                        )
+                    except cv2.error:
+                        pass
+                    # Resize and place the window to avoid cursor capture feel
+                    h, w = frame.shape[:2]
+                    cv2.resizeWindow(WINDOW_NAME, min(1280, w), min(720, h))
+                    cv2.moveWindow(WINDOW_NAME, 60, 60)
+                    log("info", "Window created on first frame")
                     window_created = True
                 except cv2.error:
-                    print("[WARN] Failed to create window; running headless")
+                    log("warn", "Failed to create window; running headless")
                     gui_mode = False
 
             # Initialize video writer lazily when first frame arrives
@@ -208,33 +292,76 @@ def main() -> None:
                 fourcc = pick_fourcc(out_path, args.fourcc)
                 writer = cv2.VideoWriter(out_path, fourcc, target_fps, (w, h))
                 if not writer.isOpened():
-                    print(
-                        f"[WARN] Failed to open writer for {out_path}. Recording disabled."
-                    )
+                    log("warn", f"Failed to open writer for {out_path}. Recording disabled.")
                     writer = None
                 else:
-                    print(f"[INFO] Recording to {out_path} at {target_fps} FPS")
+                    log("info", f"Recording to {out_path} at {target_fps} FPS")
+
+            # Prepare display frame (optionally scaled) and metrics overlay
+            disp = frame
+            if args.scale and args.scale > 0 and args.scale != 1.0:
+                try:
+                    disp = cv2.resize(
+                        frame,
+                        None,
+                        fx=float(args.scale),
+                        fy=float(args.scale),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                except cv2.error:
+                    disp = frame
+
+            if show_metrics:
+                now_ns = time.monotonic_ns()
+                dt_ms: Optional[float] = None
+                if prev_display_ns is not None:
+                    dt_ms = (now_ns - prev_display_ns) / 1e6
+                prev_display_ns = now_ns
+                fps_txt = ""
+                if dt_ms and dt_ms > 0:
+                    fps_txt = f" {1000.0/dt_ms:.1f} fps"
+                text = (
+                    f"{(dt_ms or 0):.1f} ms{fps_txt} | decode {decode_ms:.1f} ms | "
+                    f"buf {len(buffer)/1024:.0f} KB | pkts {packets}"
+                )
+                cv2.putText(
+                    disp,
+                    text,
+                    (10, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
 
             if writer is not None:
                 writer.write(frame)
 
+            # Respect max display FPS if set
             if gui_mode and window_created:
+                if min_show_interval_ns:
+                    now_ns = time.monotonic_ns()
+                    if last_show_ns is not None and (now_ns - last_show_ns) < min_show_interval_ns:
+                        # Skip this show to throttle display rate
+                        continue
+                    last_show_ns = now_ns
                 try:
-                    cv2.imshow(WINDOW_NAME, frame)
+                    cv2.imshow(WINDOW_NAME, disp)
                     # process GUI events; exit with 'q'
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         stop = True
                         break
                 except cv2.error:
                     # If GUI fails mid-run (e.g., lost X11), fallback to headless
-                    print("[WARN] cv2.imshow failed; switching to headless mode")
+                    log("warn", "cv2.imshow failed; switching to headless mode")
                     gui_mode = False
 
     finally:
         sock.close()
         if writer is not None:
             writer.release()
-            print("[INFO] Video writer released")
+            log("info", "Video writer released")
         if gui_mode:
             try:
                 cv2.destroyAllWindows()
