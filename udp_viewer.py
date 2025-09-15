@@ -4,8 +4,7 @@ UDP MJPEG viewer for Raspberry Pi 5.
 
 This script listens on udp://0.0.0.0:8080, reconstructs JPEG frames from
 UDP-delivered MJPEG (by locating JPEG SOI/EOI markers), decodes frames with
-OpenCV, and either displays them in a GUI window (if a display is available)
-or continuously saves the latest frame to 'latest_frame.jpg' when headless.
+OpenCV, and focuses on low-latency display (no image-saving fallback in headless).
 
 Usage:
     python udp_viewer.py [--record out.mp4] [--fps 30] [--fourcc mp4v] [--no-gui]
@@ -21,6 +20,7 @@ import socket
 import signal
 from typing import Optional
 import argparse
+import select
 
 import cv2
 import numpy as np
@@ -32,7 +32,6 @@ PORT: int = 8080
 SOI: bytes = b"\xff\xd8"  # JPEG Start Of Image
 EOI: bytes = b"\xff\xd9"  # JPEG End Of Image
 WINDOW_NAME: str = "UDP Stream"
-LATEST_FRAME_PATH: str = "latest_frame.jpg"
 
 
 def can_use_gui() -> bool:
@@ -102,20 +101,19 @@ def pick_fourcc(path: str, override: Optional[str]) -> int:
 def main() -> None:
     args = parse_args()
     # Initial log line required by spec
-    print(f"Listening on udp://{HOST}:{PORT}")
+    print(f"[INFO] Listening on udp://{HOST}:{PORT}")
 
     # Prepare UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # Bump receive buffer to better handle bursty UDP
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
     sock.bind((HOST, PORT))
-    sock.settimeout(1.0)
+    sock.setblocking(False)  # non-blocking for low latency
+    print("[INFO] Socket configured: non-blocking, rcvbuf=4MB")
 
     # Choose output mode based on environment
     gui_mode = can_use_gui() and not args.no_gui
-    if gui_mode:
-        # Allow resizing window for different resolutions
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    window_created = False  # lazy-create window on first decoded frame
 
     # Graceful shutdown support
     stop = False
@@ -130,6 +128,7 @@ def main() -> None:
     # Rolling buffer accumulates UDP payloads until complete JPEG is found
     buffer = bytearray()
     max_buffer_bytes = 64 * 1024 * 1024  # safety cap to avoid unbounded growth
+    print(f"[INFO] Max buffer size set to {max_buffer_bytes//(1024*1024)}MB")
 
     writer: Optional[cv2.VideoWriter] = None
     out_path = args.record
@@ -137,19 +136,31 @@ def main() -> None:
 
     try:
         while not stop:
-            # 1) Receive available UDP data
-            try:
-                data, _addr = sock.recvfrom(65535)
-                buffer.extend(data)
-            except socket.timeout:
-                pass  # proceed to attempt parsing existing buffer
+            # 1) Receive all available UDP data without blocking
+            rlist, _, _ = select.select([sock], [], [], 0.0)
+            packets = 0
+            bytes_in = 0
+            while rlist:
+                try:
+                    data, _addr = sock.recvfrom(65535)
+                    buffer.extend(data)
+                    packets += 1
+                    bytes_in += len(data)
+                except BlockingIOError:
+                    break
+                rlist, _, _ = select.select([sock], [], [], 0.0)
+            if packets:
+                print(f"[DBG] recv packets={packets}, bytes={bytes_in}, buffer_len={len(buffer)}")
 
-            # 2) Extract as many complete JPEG frames as currently available
+            # 2) Extract frames; keep only most recent to minimize latency
+            latest_frame_bytes: Optional[bytes] = None
+            frames_found = 0
             while True:
                 start = buffer.find(SOI)
                 if start == -1:
                     # No start marker present; periodically prune oversized buffer
                     if len(buffer) > max_buffer_bytes:
+                        print("[WARN] Buffer oversized without SOI, clearing")
                         buffer.clear()
                     break
 
@@ -158,54 +169,72 @@ def main() -> None:
                     # Incomplete frame so far; optionally prune old data
                     if len(buffer) > max_buffer_bytes:
                         # keep last 2MB hoping it contains SOI of next frame
+                        print("[WARN] Buffer oversized with incomplete frame, trimming tail to 2MB")
                         buffer[:] = buffer[-(2 * 1024 * 1024) :]
                     break
 
-                # Extract one complete JPEG [SOI ... EOI]
-                jpeg_bytes = bytes(buffer[start : end + 2])
+                # Extract complete JPEG; prefer the latest
+                latest_frame_bytes = bytes(buffer[start : end + 2])
+                frames_found += 1
                 # Discard consumed bytes up to end marker
                 del buffer[: end + 2]
 
-                # 3) Decode and output
-                frame = decode_jpeg(jpeg_bytes)
-                if frame is None:
-                    continue
+            if frames_found > 1:
+                print(f"[DBG] dropped {frames_found-1} older frames; decoding latest only")
 
-                # Initialize video writer lazily when first frame arrives
-                if out_path and writer is None:
-                    h, w = frame.shape[:2]
-                    fourcc = pick_fourcc(out_path, args.fourcc)
-                    writer = cv2.VideoWriter(out_path, fourcc, target_fps, (w, h))
-                    if not writer.isOpened():
-                        print(
-                            f"[WARN] Failed to open writer for {out_path}. Recording disabled."
-                        )
-                        writer = None
+            if latest_frame_bytes is None:
+                # No complete frame yet; continue receiving
+                continue
 
-                if writer is not None:
-                    writer.write(frame)
+            # 3) Decode only the latest frame to minimize latency
+            frame = decode_jpeg(latest_frame_bytes)
+            if frame is None:
+                print("[WARN] Failed to decode JPEG frame")
+                continue
 
-                if gui_mode:
-                    try:
-                        cv2.imshow(WINDOW_NAME, frame)
-                        # process GUI events; exit with 'q'
-                        if cv2.waitKey(1) & 0xFF == ord("q"):
-                            stop = True
-                            break
-                    except cv2.error:
-                        # If GUI fails mid-run (e.g., lost X11), fallback to headless
-                        gui_mode = False
+            # Create window lazily
+            if gui_mode and not window_created:
+                try:
+                    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+                    print("[INFO] Window created on first frame")
+                    window_created = True
+                except cv2.error:
+                    print("[WARN] Failed to create window; running headless")
+                    gui_mode = False
 
-                if not gui_mode:
-                    # Continuously write the latest frame to disk in headless mode
-                    cv2.imwrite(
-                        LATEST_FRAME_PATH, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+            # Initialize video writer lazily when first frame arrives
+            if out_path and writer is None:
+                h, w = frame.shape[:2]
+                fourcc = pick_fourcc(out_path, args.fourcc)
+                writer = cv2.VideoWriter(out_path, fourcc, target_fps, (w, h))
+                if not writer.isOpened():
+                    print(
+                        f"[WARN] Failed to open writer for {out_path}. Recording disabled."
                     )
+                    writer = None
+                else:
+                    print(f"[INFO] Recording to {out_path} at {target_fps} FPS")
+
+            if writer is not None:
+                writer.write(frame)
+
+            if gui_mode and window_created:
+                try:
+                    cv2.imshow(WINDOW_NAME, frame)
+                    # process GUI events; exit with 'q'
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        stop = True
+                        break
+                except cv2.error:
+                    # If GUI fails mid-run (e.g., lost X11), fallback to headless
+                    print("[WARN] cv2.imshow failed; switching to headless mode")
+                    gui_mode = False
 
     finally:
         sock.close()
         if writer is not None:
             writer.release()
+            print("[INFO] Video writer released")
         if gui_mode:
             try:
                 cv2.destroyAllWindows()
