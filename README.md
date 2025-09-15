@@ -11,7 +11,7 @@ Dự án nhỏ giúp nhận luồng MJPEG qua UDP từ OBS (PC) và hiển thị
 - Giải mã bằng OpenCV.
   - Có GUI → hiển thị cửa sổ "UDP Stream".
   - Headless → ghi liên tục ảnh `latest_frame.jpg`.
-- Code gọn, có comment, dễ đọc.
+- Tùy chọn ghi stream ra file video (`--record out.mp4` hoặc `.avi`).
 
 ---
 
@@ -92,6 +92,24 @@ python udp_viewer.py
 - Có GUI → hiện cửa sổ "UDP Stream".
 - SSH/headless → ảnh sẽ được lưu liên tục vào `latest_frame.jpg`.
 
+### Ghi video ra file (tùy chọn)
+
+```bash
+# Ghi MP4 (mặc định dùng fourcc mp4v)
+python udp_viewer.py --record out.mp4
+
+# Ghi AVI (khuyến nghị fourcc XVID)
+python udp_viewer.py --record out.avi --fourcc XVID
+
+# Điều chỉnh FPS cho file đầu ra (mặc định 30)
+python udp_viewer.py --record out.mp4 --fps 25
+
+# Chạy headless cưỡng bức (không mở cửa sổ)
+python udp_viewer.py --no-gui --record out.mp4
+```
+
+Lưu ý: nếu MP4 không mở được (thiếu codec), hãy dùng `.avi` với `--fourcc XVID`.
+
 ### Ghi chú GUI vs SSH headless
 
 - Chạy trực tiếp trên Pi có màn hình/desktop → dùng `cv2.imshow`.
@@ -117,7 +135,7 @@ python udp_viewer.py
 
 ```
 .
-├─ udp_viewer.py        # Nhận & hiển thị MJPEG qua UDP
+├─ udp_viewer.py        # Nhận & hiển thị MJPEG qua UDP; hỗ trợ ghi video
 ├─ setup.sh             # Script cài đặt nhanh trên Raspberry Pi 5
 ├─ requirements.txt     # Dependencies Python
 ├─ .gitignore           # Bỏ qua venv, cache, media tạm

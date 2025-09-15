@@ -8,7 +8,7 @@ OpenCV, and either displays them in a GUI window (if a display is available)
 or continuously saves the latest frame to 'latest_frame.jpg' when headless.
 
 Usage:
-    python udp_viewer.py
+    python udp_viewer.py [--record out.mp4] [--fps 30] [--fourcc mp4v] [--no-gui]
 
 Notes:
     - If running over SSH without X11, consider using `ffplay udp://@:8080`.
@@ -20,6 +20,7 @@ import os
 import socket
 import signal
 from typing import Optional
+import argparse
 
 import cv2
 import numpy as np
@@ -57,7 +58,49 @@ def decode_jpeg(byte_data: bytes) -> Optional[np.ndarray]:
     return img
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="UDP MJPEG viewer/recorder for Raspberry Pi 5"
+    )
+    parser.add_argument(
+        "--record",
+        type=str,
+        default=None,
+        help="Path to output video file (e.g., out.mp4 or out.avi)",
+    )
+    parser.add_argument(
+        "--fps", type=float, default=30.0, help="Target FPS for recording"
+    )
+    parser.add_argument(
+        "--fourcc",
+        type=str,
+        default=None,
+        help="FOURCC codec (default: auto by extension; mp4v for .mp4, XVID for .avi, MJPG otherwise)",
+    )
+    parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Force headless mode even if a display is available",
+    )
+    return parser.parse_args()
+
+
+def pick_fourcc(path: str, override: Optional[str]) -> int:
+    if override:
+        code = override
+    else:
+        lower = path.lower()
+        if lower.endswith(".mp4"):
+            code = "mp4v"  # widely available; H.264 not guaranteed on all builds
+        elif lower.endswith(".avi"):
+            code = "XVID"
+        else:
+            code = "MJPG"
+    return cv2.VideoWriter_fourcc(*code)
+
+
 def main() -> None:
+    args = parse_args()
     # Initial log line required by spec
     print(f"Listening on udp://{HOST}:{PORT}")
 
@@ -69,7 +112,7 @@ def main() -> None:
     sock.settimeout(1.0)
 
     # Choose output mode based on environment
-    gui_mode = can_use_gui()
+    gui_mode = can_use_gui() and not args.no_gui
     if gui_mode:
         # Allow resizing window for different resolutions
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
@@ -87,6 +130,10 @@ def main() -> None:
     # Rolling buffer accumulates UDP payloads until complete JPEG is found
     buffer = bytearray()
     max_buffer_bytes = 64 * 1024 * 1024  # safety cap to avoid unbounded growth
+
+    writer: Optional[cv2.VideoWriter] = None
+    out_path = args.record
+    target_fps = max(1.0, float(args.fps))
 
     try:
         while not stop:
@@ -111,7 +158,7 @@ def main() -> None:
                     # Incomplete frame so far; optionally prune old data
                     if len(buffer) > max_buffer_bytes:
                         # keep last 2MB hoping it contains SOI of next frame
-                        buffer[:] = buffer[-(2 * 1024 * 1024):]
+                        buffer[:] = buffer[-(2 * 1024 * 1024) :]
                     break
 
                 # Extract one complete JPEG [SOI ... EOI]
@@ -123,6 +170,20 @@ def main() -> None:
                 frame = decode_jpeg(jpeg_bytes)
                 if frame is None:
                     continue
+
+                # Initialize video writer lazily when first frame arrives
+                if out_path and writer is None:
+                    h, w = frame.shape[:2]
+                    fourcc = pick_fourcc(out_path, args.fourcc)
+                    writer = cv2.VideoWriter(out_path, fourcc, target_fps, (w, h))
+                    if not writer.isOpened():
+                        print(
+                            f"[WARN] Failed to open writer for {out_path}. Recording disabled."
+                        )
+                        writer = None
+
+                if writer is not None:
+                    writer.write(frame)
 
                 if gui_mode:
                     try:
@@ -137,10 +198,14 @@ def main() -> None:
 
                 if not gui_mode:
                     # Continuously write the latest frame to disk in headless mode
-                    cv2.imwrite(LATEST_FRAME_PATH, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    cv2.imwrite(
+                        LATEST_FRAME_PATH, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+                    )
 
     finally:
         sock.close()
+        if writer is not None:
+            writer.release()
         if gui_mode:
             try:
                 cv2.destroyAllWindows()
@@ -153,5 +218,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
-
-
