@@ -252,7 +252,7 @@ async def run_pipeline(
 
     ui = TrackerUI(cfg, on_config_change, on_apply_udp=restart_udp)
     ui.build()
-    ui.show_loader()
+    ui.request_show_loader()
     threading.Thread(target=ui.render_loop, daemon=True).start()
 
     async with MakcuAsyncController(cfg.controller) as ctrl:
@@ -289,10 +289,7 @@ async def run_pipeline(
                     continue
                 # first frame -> switch UI to main
                 if ns is None or _should_log(ns.log_level, "info"):
-                    try:
-                        ui.show_main()
-                    except Exception as e:
-                        print(f"[UI] show_main failed: {e}")
+                    ui.request_show_main()
 
                 timer.tick()
                 h, w = frame.shape[:2]

@@ -40,6 +40,7 @@ class TrackerUI:
         self._main_win = "main"
         self._loader_win = "loader"
         self._loader_text_tag = "loader_text"
+        self._actions: list[tuple[str, tuple, dict]] = []
 
     def set_frame(self, frame_bgr: np.ndarray) -> None:
         with self._lock:
@@ -312,28 +313,47 @@ class TrackerUI:
         dpg.setup_dearpygui()
         dpg.show_viewport()
 
-    def show_loader(self) -> None:
-        try:
-            dpg.configure_item(self._loader_win, show=True)
-            dpg.configure_item(self._main_win, show=False)
-        except Exception as e:
-            print(f"[UI] show_loader error: {e}")
+    def _do_show_loader(self) -> None:
+        dpg.configure_item(self._loader_win, show=True)
+        dpg.configure_item(self._main_win, show=False)
 
-    def show_main(self) -> None:
-        try:
-            dpg.configure_item(self._loader_win, show=False)
-            dpg.configure_item(self._main_win, show=True)
-        except Exception as e:
-            print(f"[UI] show_main error: {e}")
+    def _do_show_main(self) -> None:
+        dpg.configure_item(self._loader_win, show=False)
+        dpg.configure_item(self._main_win, show=True)
 
-    def set_loader_text(self, msg: str) -> None:
-        try:
-            dpg.set_value(self._loader_text_tag, msg)
-        except Exception as e:
-            print(f"[UI] set_loader_text error: {e}")
+    def _do_set_loader_text(self, msg: str) -> None:
+        dpg.set_value(self._loader_text_tag, msg)
+
+    # Thread-safe action queue
+    def _post(self, name: str, *args, **kwargs) -> None:
+        with self._lock:
+            self._actions.append((name, args, kwargs))
+
+    def request_show_loader(self) -> None:
+        self._post("show_loader")
+
+    def request_show_main(self) -> None:
+        self._post("show_main")
+
+    def request_loader_text(self, msg: str) -> None:
+        self._post("set_loader_text", msg)
 
     def render_loop(self) -> None:
         while dpg.is_dearpygui_running():
+            # process queued UI actions on render thread
+            try:
+                with self._lock:
+                    actions = list(self._actions)
+                    self._actions.clear()
+                for name, args, kwargs in actions:
+                    if name == "show_loader":
+                        self._do_show_loader()
+                    elif name == "show_main":
+                        self._do_show_main()
+                    elif name == "set_loader_text":
+                        self._do_set_loader_text(*args, **kwargs)
+            except Exception as e:
+                print(f"[UI] action error: {e}")
             self.update_texture()
             dpg.render_dearpygui_frame()
         dpg.destroy_context()
