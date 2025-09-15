@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 
@@ -24,12 +24,12 @@ class ROI:
 
 @dataclass
 class TrackerConfig:
-    hsv: HSVRange = HSVRange()
+    hsv: HSVRange = field(default_factory=HSVRange)
     min_area: int = 150
     blur_kernel: int = 5
     morph_kernel: int = 3
     use_roi: bool = False
-    roi: ROI = ROI()
+    roi: ROI = field(default_factory=ROI)
     # target selection: 'centroid' | 'topmost' | 'bbox_topcenter'
     target_mode: str = "centroid"
 
@@ -63,13 +63,13 @@ class PipelineConfig:
     udp_host: str = "0.0.0.0"
     udp_port: int = 8080
     # Tracker
-    tracker: TrackerConfig = TrackerConfig()
+    tracker: TrackerConfig = field(default_factory=TrackerConfig)
     # Mapping
-    mapping: MappingConfig = MappingConfig()
+    mapping: MappingConfig = field(default_factory=MappingConfig)
     # Smoothing
-    smoothing: SmoothingConfig = SmoothingConfig()
+    smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
     # Controller
-    controller: ControllerConfig = ControllerConfig()
+    controller: ControllerConfig = field(default_factory=ControllerConfig)
     # Overlay/debug
     show_overlay: bool = True
     display_scale: float = 1.0
