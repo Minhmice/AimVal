@@ -36,6 +36,7 @@ class TrackerUI:
         self._last_frame: Optional[np.ndarray] = None
         self._main_win = "main"
         self._loader_win = "loader"
+        self._loader_text_tag = "loader_text"
 
     def set_frame(self, frame_bgr: np.ndarray) -> None:
         with self._lock:
@@ -124,7 +125,7 @@ class TrackerUI:
 
         # Loader window (shown first)
         with dpg.window(tag=self._loader_win, label="Starting...", width=1280, height=820):
-            dpg.add_text("Finding OBS stream PC...")
+            dpg.add_text("Finding OBS stream PC...", tag=self._loader_text_tag)
             dpg.add_loading_indicator()
 
         # Main window hidden until first frame
@@ -299,6 +300,12 @@ class TrackerUI:
             dpg.configure_item(self._main_win, show=True)
         except Exception as e:
             print(f"[UI] show_main error: {e}")
+
+    def set_loader_text(self, msg: str) -> None:
+        try:
+            dpg.set_value(self._loader_text_tag, msg)
+        except Exception as e:
+            print(f"[UI] set_loader_text error: {e}")
 
     def render_loop(self) -> None:
         while dpg.is_dearpygui_running():

@@ -156,10 +156,24 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
     # Use udp_viewer_2 receiver for frames
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        # Allow quick rebinding if previous run left port in TIME_WAIT
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    except OSError:
+        pass
+    try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
     except OSError:
         pass
-    sock.bind((cfg.udp_host, int(cfg.udp_port)))
+    try:
+        sock.bind((cfg.udp_host, int(cfg.udp_port)))
+    except OSError as e:
+        print(f"[ERROR] UDP bind failed on {cfg.udp_host}:{cfg.udp_port} - {e}")
+        ui_temp = TrackerUI(cfg, lambda c: None)
+        try:
+            ui_temp.set_loader_text(f"Port {cfg.udp_port} in use. Close other app or change port.")
+        except Exception:
+            pass
+        raise
     sock.setblocking(False)
 
     store = uv2.FrameBuffer()
@@ -208,10 +222,18 @@ async def run_pipeline(cfg: PipelineConfig, ns: argparse.Namespace | None = None
             pass
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except OSError:
+            pass
+        try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
         except OSError:
             pass
-        sock.bind((state["cfg"].udp_host, int(state["cfg"].udp_port)))
+        try:
+            sock.bind((state["cfg"].udp_host, int(state["cfg"].udp_port)))
+        except OSError as e:
+            print(f"[ERROR] UDP rebinding failed: {e}")
+            return
         sock.setblocking(False)
         store = uv2.FrameBuffer()
         recv_thread = uv2.ReceiverThread(sock, 64 * 1024 * 1024, store)
