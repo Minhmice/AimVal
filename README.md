@@ -136,11 +136,50 @@ Lưu ý: nếu MP4 không mở được (thiếu codec), hãy dùng `.avi` với
 ```
 .
 ├─ udp_viewer.py        # Nhận & hiển thị MJPEG qua UDP; hỗ trợ ghi video
+├─ run_tracker.py       # Entry chạy tracker + makcu controller
+├─ aimval_tracker/      # Gói module cho pipeline theo component
+│  ├─ __init__.py
+│  ├─ config.py         # Dataclass cấu hình
+│  ├─ frame_source.py   # Nguồn khung hình (UDP MJPEG / video / capture)
+│  ├─ tracker.py        # Tracker HSV + contour
+│  ├─ mapping.py        # Tuyến tính & homography mapping
+│  ├─ smoothing.py      # EMA, deadzone, velocity clamp
+│  ├─ controller.py     # Async Makcu controller wrapper
+│  └─ utils.py          # Tiện ích chung (timing, overlay, roi)
 ├─ setup.sh             # Script cài đặt nhanh trên Raspberry Pi 5
 ├─ requirements.txt     # Dependencies Python
 ├─ .gitignore           # Bỏ qua venv, cache, media tạm
 └─ README.md            # Tài liệu
 ```
+
+---
+
+## Tracker + Makcu (PC1 nhận stream, điều khiển chuột PC2)
+
+### Cài đặt
+
+```bash
+pip install -r requirements.txt
+```
+
+Đảm bảo thiết bị Makcu đã cắm điều khiển vào PC2 và PC1 điều khiển qua serial (Option A). Nếu dùng Option B, chạy lib `makcu` trên PC2 và chỉ stream toạ độ từ PC1.
+
+### Chạy nhanh
+
+```bash
+python run_tracker.py --udp-host 0.0.0.0 --udp-port 8080 \
+  --h-low 0 --s-low 120 --v-low 120 --h-high 10 --s-high 255 --v-high 255 \
+  --screen 1920x1080 --overlay --scale 0.8
+```
+
+Các tham số chính:
+- `--roi x,y,w,h`: bật ROI để hạn chế vùng tìm kiếm.
+- `--mapping linear|homography`: ánh xạ tuyến tính hoặc qua homography.
+- `--homography x1,y1;...;x4,y4`: nguồn 4 điểm khi dùng homography (đích là bốn góc màn hình).
+- `--ema`, `--deadzone`, `--max-step`: làm mượt và giới hạn bước.
+- `--tick-hz`: tần số điều khiển makcu (mặc định 240Hz).
+
+Nhấn `q` để thoát cửa sổ hiển thị.
 
 ---
 

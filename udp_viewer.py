@@ -22,6 +22,7 @@ from typing import Optional
 import argparse
 import select
 import time
+import sys
 
 import cv2
 import numpy as np
@@ -128,6 +129,11 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Cap display refresh FPS (0 = unlimited)",
     )
+    parser.add_argument(
+        "--no-tty-metrics",
+        action="store_true",
+        help="Disable terminal metrics (real-time and averages)",
+    )
     return parser.parse_args()
 
 
@@ -196,9 +202,36 @@ def main() -> None:
     out_path = args.record
     target_fps = max(1.0, float(args.fps))
 
-    # Metrics
-    show_metrics = not args.no_metrics
+    # Overlay metrics are disabled on frame (moved to terminal output)
+    show_overlay = False
+
+    # Terminal metrics
+    enable_tty_metrics = not args.no_tty_metrics
+    tty_init = False
     prev_display_ns: Optional[int] = None
+    first_display_ns: Optional[int] = None
+    total_display_ns: int = 0
+    display_frames: int = 0
+
+    def tty_update(rt_ms: float, rt_fps: float, avg_ms: float, avg_fps: float) -> None:
+        nonlocal tty_init
+        try:
+            if not tty_init:
+                # Allocate two lines
+                sys.stdout.write("\n\n")
+                tty_init = True
+            # Move cursor up 2 lines to update in place
+            sys.stdout.write("\x1b[2F")  # cursor up 2 lines
+            sys.stdout.write("\x1b[2K")  # clear line
+            sys.stdout.write(f"RT: {rt_ms:.1f} ms {rt_fps:.1f} fps\n")
+            sys.stdout.write("\x1b[2K")
+            sys.stdout.write(f"AVG: {avg_ms:.1f} ms {avg_fps:.1f} fps\n")
+            sys.stdout.flush()
+        except Exception:
+            # Fallback: print without ANSI control
+            print(f"RT: {rt_ms:.1f} ms {rt_fps:.1f} fps")
+            print(f"AVG: {avg_ms:.1f} ms {avg_fps:.1f} fps")
+
     last_show_ns: Optional[int] = None
     min_show_interval_ns = 0
     if args.max_display_fps and args.max_display_fps > 0:
@@ -297,7 +330,7 @@ def main() -> None:
                 else:
                     log("info", f"Recording to {out_path} at {target_fps} FPS")
 
-            # Prepare display frame (optionally scaled) and metrics overlay
+            # Prepare display frame (optionally scaled). Overlay disabled.
             disp = frame
             if args.scale and args.scale > 0 and args.scale != 1.0:
                 try:
@@ -311,41 +344,42 @@ def main() -> None:
                 except cv2.error:
                     disp = frame
 
-            if show_metrics:
-                now_ns = time.monotonic_ns()
-                dt_ms: Optional[float] = None
-                if prev_display_ns is not None:
-                    dt_ms = (now_ns - prev_display_ns) / 1e6
-                prev_display_ns = now_ns
-                fps_txt = ""
-                if dt_ms and dt_ms > 0:
-                    fps_txt = f" {1000.0/dt_ms:.1f} fps"
-                text = (
-                    f"{(dt_ms or 0):.1f} ms{fps_txt} | decode {decode_ms:.1f} ms | "
-                    f"buf {len(buffer)/1024:.0f} KB | pkts {packets}"
-                )
-                cv2.putText(
-                    disp,
-                    text,
-                    (10, 24),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                    cv2.LINE_AA,
-                )
-
             if writer is not None:
                 writer.write(frame)
 
             # Respect max display FPS if set
-            if gui_mode and window_created:
-                if min_show_interval_ns:
-                    now_ns = time.monotonic_ns()
-                    if last_show_ns is not None and (now_ns - last_show_ns) < min_show_interval_ns:
-                        # Skip this show to throttle display rate
-                        continue
+            should_show = gui_mode and window_created
+            if should_show and min_show_interval_ns:
+                now_ns = time.monotonic_ns()
+                if last_show_ns is not None and (now_ns - last_show_ns) < min_show_interval_ns:
+                    should_show = False
+                else:
                     last_show_ns = now_ns
+
+            # Terminal metrics
+            if enable_tty_metrics:
+                now = time.monotonic_ns()
+                rt_ms = 0.0
+                rt_fps = 0.0
+                if prev_display_ns is not None:
+                    dt_ns = now - prev_display_ns
+                    if dt_ns > 0:
+                        rt_ms = dt_ns / 1e6
+                        rt_fps = 1e9 / dt_ns
+                prev_display_ns = now
+                if first_display_ns is None:
+                    first_display_ns = now
+                else:
+                    total_display_ns = now - first_display_ns
+                display_frames += 1
+                avg_ms = 0.0
+                avg_fps = 0.0
+                if total_display_ns > 0:
+                    avg_ms = (total_display_ns / display_frames) / 1e6
+                    avg_fps = display_frames / (total_display_ns / 1e9)
+                tty_update(rt_ms, rt_fps, avg_ms, avg_fps)
+
+            if should_show:
                 try:
                     cv2.imshow(WINDOW_NAME, disp)
                     # process GUI events; exit with 'q'
