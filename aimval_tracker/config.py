@@ -73,5 +73,5 @@ class PipelineConfig:
     # Overlay/debug
     show_overlay: bool = True
     display_scale: float = 1.0
-
-
+    aimbot: bool = False
+    show_box: bool = False

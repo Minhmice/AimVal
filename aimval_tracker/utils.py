@@ -29,12 +29,17 @@ def draw_overlay(
     target_scr: Optional[Tuple[int, int]],
     roi_rect: Tuple[int, int, int, int],
     timer: FrameTimer,
+    show_box: bool = False,
 ) -> np.ndarray:
     out = img.copy()
     x, y, w, h = roi_rect
     cv2.rectangle(out, (x, y), (x + w, y + h), (0, 140, 255), 1)
     if centroid is not None:
         cv2.circle(out, centroid, 5, (0, 0, 255), -1)
+        if show_box:
+            bx, by = centroid
+            size = 18
+            cv2.rectangle(out, (bx - size // 2, by - size // 2), (bx + size // 2, by + size // 2), (255, 0, 255), 2)
     if target_scr is not None:
         cv2.putText(
             out,
@@ -57,5 +62,3 @@ def draw_overlay(
         cv2.LINE_AA,
     )
     return out
-
-

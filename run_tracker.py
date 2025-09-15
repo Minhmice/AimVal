@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 from typing import Optional, Tuple
+import socket
+import threading
+import time
 
 import cv2
 
@@ -18,6 +21,8 @@ from aimval_tracker import (
     FrameTimer,
     draw_overlay,
 )
+from aimval_tracker.ui import TrackerUI
+import udp_viewer_2 as uv2
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,7 +147,19 @@ def build_config(ns: argparse.Namespace) -> PipelineConfig:
 
 
 async def run_pipeline(cfg: PipelineConfig) -> None:
-    stream = UDPJPEGStream(cfg.udp_host, cfg.udp_port)
+    # Use udp_viewer_2 receiver for frames
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
+    except OSError:
+        pass
+    sock.bind((cfg.udp_host, int(cfg.udp_port)))
+    sock.setblocking(False)
+
+    store = uv2.FrameBuffer()
+    recv_thread = uv2.ReceiverThread(sock, 64 * 1024 * 1024, store)
+    recv_thread.start()
+
     tracker = HSVTracker(cfg.tracker)
 
     if (
@@ -158,26 +175,83 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
     timer = FrameTimer()
     window = None
 
+    # UI setup
+    state = {"cfg": cfg, "tracker": tracker, "mapper": None, "smoother": smoother}
+
+    def on_config_change(new_cfg: PipelineConfig) -> None:
+        state["cfg"] = new_cfg
+        state["tracker"] = HSVTracker(new_cfg.tracker)
+        if (
+            new_cfg.mapping.method == "homography"
+            and new_cfg.mapping.homography_src
+            and new_cfg.mapping.homography_dst
+        ):
+            state["mapper"] = HomographyMapper(new_cfg.mapping)
+        else:
+            state["mapper"] = LinearMapper(new_cfg.mapping)
+        state["smoother"] = EMASmoother(new_cfg.smoothing)
+
+    ui = TrackerUI(cfg, on_config_change)
+    ui.build()
+    threading.Thread(target=ui.render_loop, daemon=True).start()
+
     async with MakcuAsyncController(cfg.controller) as ctrl:
         # Assume starting from the center of the screen for estimate
         sw, sh = cfg.mapping.screen_size
         ctrl.set_estimated_cursor(sw / 2, sh / 2)
 
-        for frame in stream.frames():
+        # Prepare JPEG decoder (TurboJPEG if available via uv2)
+        use_turbo = False
+        jpeg_decoder = None
+        if uv2.TurboJPEG is not None:
+            try:
+                jpeg_decoder = uv2.TurboJPEG()
+                use_turbo = True
+            except Exception:
+                jpeg_decoder = None
+                use_turbo = False
+
+        while True:
+            buf = store.get_latest()
+            if buf is None:
+                await asyncio.sleep(0.001)
+                continue
+            t0 = time.monotonic_ns()
+            if use_turbo and jpeg_decoder is not None:
+                try:
+                    frame = jpeg_decoder.decode(buf)
+                except Exception:
+                    frame = uv2.decode_jpeg_cv2(buf)
+            else:
+                frame = uv2.decode_jpeg_cv2(buf)
+            if frame is None:
+                continue
+
             timer.tick()
             h, w = frame.shape[:2]
 
-            centroid, mask_bgr, roi_rect = tracker.process(frame)
+            centroid, mask_bgr, roi_rect = state["tracker"].process(frame)
 
             target_scr: Optional[Tuple[int, int]] = None
+            mapper_obj = state["mapper"]
+            if mapper_obj is None:
+                if (
+                    cfg.mapping.method == "homography"
+                    and cfg.mapping.homography_src
+                    and cfg.mapping.homography_dst
+                ):
+                    mapper_obj = HomographyMapper(cfg.mapping)
+                else:
+                    mapper_obj = LinearMapper(cfg.mapping)
+                state["mapper"] = mapper_obj
             if centroid is not None:
-                x_scr, y_scr = mapper.map_point(centroid, (w, h))
+                x_scr, y_scr = mapper_obj.map_point(centroid, (w, h))
                 target_scr = (x_scr, y_scr)
 
             # Prepare visualization
             disp = frame
             if cfg.show_overlay:
-                disp = draw_overlay(disp, centroid, target_scr, roi_rect, timer)
+                disp = draw_overlay(disp, centroid, target_scr, roi_rect, timer, show_box=state["cfg"].show_box)
                 # Small debug mask inset
                 try:
                     mask_small = cv2.resize(mask_bgr, (w // 4, h // 4))
@@ -195,35 +269,25 @@ async def run_pipeline(cfg: PipelineConfig) -> None:
 
             # Control loop at frame cadence (can decouple to tick-hz with task)
             est = ctrl.get_estimated_cursor()
-            if target_scr is not None and est is not None:
-                smoothed = smoother.smooth(target_scr)
+            if target_scr is not None and est is not None and state["cfg"].aimbot:
+                smoothed = state["smoother"].smooth(target_scr)
                 if smoothed is None:
                     smoothed = (float(target_scr[0]), float(target_scr[1]))
-                dx, dy = smoother.step_delta(est, smoothed)
+                dx, dy = state["smoother"].step_delta(est, smoothed)
                 await ctrl.move_delta(dx, dy)
             else:
                 # No target detected; keep smoother state but don't move
-                smoother.smooth(None)
+                state["smoother"].smooth(None)
 
-            # Show window and handle quit
-            if window is None:
-                try:
-                    cv2.namedWindow("AimVal Tracker", cv2.WINDOW_NORMAL)
-                    cv2.resizeWindow(
-                        "AimVal Tracker",
-                        min(1280, disp.shape[1]),
-                        min(720, disp.shape[0]),
-                    )
-                    window = "AimVal Tracker"
-                except cv2.error:
-                    window = None
-            if window is not None:
-                try:
-                    cv2.imshow(window, disp)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        break
-                except cv2.error:
-                    window = None
+            # Send frame to UI viewer (top area)
+            ui.set_frame(disp)
+
+    # Cleanup
+    try:
+        recv_thread.stop()
+        recv_thread.join(timeout=1.0)
+    finally:
+        sock.close()
 
 
 def main() -> None:

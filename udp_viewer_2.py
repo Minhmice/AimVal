@@ -25,6 +25,7 @@ import socket
 import sys
 import threading
 import time
+import select
 from typing import Optional
 
 import cv2
