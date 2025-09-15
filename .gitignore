@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Media artifacts
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+
+# Misc
+*.log
+
+
