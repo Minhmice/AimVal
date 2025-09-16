@@ -7,7 +7,6 @@ from .config import (
     ControllerConfig,
     PipelineConfig,
 )
-from .frame_source import UDPJPEGStream
 from .tracker import HSVTracker
 from .mapping import LinearMapper, HomographyMapper
 from .smoothing import EMASmoother
@@ -22,7 +21,6 @@ __all__ = [
     "SmoothingConfig",
     "ControllerConfig",
     "PipelineConfig",
-    "UDPJPEGStream",
     "HSVTracker",
     "LinearMapper",
     "HomographyMapper",

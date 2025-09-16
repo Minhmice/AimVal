@@ -12,7 +12,6 @@ import cv2
 
 from aimval_tracker import (
     PipelineConfig,
-    UDPJPEGStream,
     HSVTracker,
     LinearMapper,
     HomographyMapper,

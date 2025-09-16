@@ -27,7 +27,9 @@ class HSVTracker:
             cv2.MORPH_ELLIPSE, (max(1, cfg.morph_kernel), max(1, cfg.morph_kernel))
         )
 
-    def process(self, frame_bgr: np.ndarray) -> Tuple[Optional[Tuple[int, int]], np.ndarray, Tuple[int, int, int, int]]:
+    def process(
+        self, frame_bgr: np.ndarray
+    ) -> Tuple[Optional[Tuple[int, int]], np.ndarray, Tuple[int, int, int, int]]:
         """Return (target_point or None, debug_mask_bgr, roi_rect).
 
         roi_rect = (x, y, w, h) in full-frame coordinates.
@@ -109,5 +111,3 @@ class HSVTracker:
 
         roi_rect = (ox, oy, mask.shape[1], mask.shape[0])
         return target, mask_bgr, roi_rect
-
-
