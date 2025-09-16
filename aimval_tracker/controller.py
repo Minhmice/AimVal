@@ -49,3 +49,30 @@ class MakcuAsyncController:
         if self._ctrl is None:
             return
         await self._ctrl.click(button)
+
+
+class NullController:
+    """No-op controller used when Makcu device is unavailable."""
+
+    def __init__(self) -> None:
+        self._current_pos: Optional[Tuple[float, float]] = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def set_estimated_cursor(self, x: float, y: float) -> None:
+        self._current_pos = (x, y)
+
+    def get_estimated_cursor(self) -> Optional[Tuple[float, float]]:
+        return self._current_pos
+
+    async def move_delta(self, dx: int, dy: int) -> None:
+        if self._current_pos is not None:
+            x, y = self._current_pos
+            self._current_pos = (x + dx, y + dy)
+
+    async def click(self, button: MouseButton = MouseButton.LEFT) -> None:
+        return
