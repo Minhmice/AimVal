@@ -16,6 +16,13 @@ Usage:
 Install optional TurboJPEG on Pi:
   sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
   pip install PyTurboJPEG
+
+Design notes:
+- The receiver thread accumulates bytes from UDP datagrams and searches for
+  JPEG SOI/EOI markers to extract complete frames. Only the most recent full
+  frame is kept, minimizing latency under bursty conditions.
+- The main thread decodes and displays frames, with optional GUI and live
+  runtime controls managed via a small config window of trackbars.
 """
 from __future__ import annotations
 
@@ -97,6 +104,7 @@ class ReceiverThread(threading.Thread):
         self._stop.set()
 
     def run(self) -> None:
+        """Continuously read UDP data, assemble JPEGs, and publish the newest."""
         while not self._stop.is_set():
             # Drain socket
             rlist, _, _ = select.select([self.sock], [], [], 0.002)

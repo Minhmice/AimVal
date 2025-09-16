@@ -29,10 +29,20 @@ class TrackerUI:
         cfg: PipelineConfig,
         on_config_change: Callable[[PipelineConfig], None],
         on_apply_udp: Optional[Callable[[], None]] = None,
+        on_connect_stream: Optional[Callable[[], None]] = None,
+        on_disconnect_stream: Optional[Callable[[], None]] = None,
+        on_connect_makcu: Optional[Callable[[], None]] = None,
+        on_disconnect_makcu: Optional[Callable[[], None]] = None,
+        on_toggle_tracker: Optional[Callable[[bool], None]] = None,
     ) -> None:
         self.cfg = cfg
         self.on_config_change = on_config_change
         self._on_apply_udp = on_apply_udp
+        self._on_connect_stream = on_connect_stream
+        self._on_disconnect_stream = on_disconnect_stream
+        self._on_connect_makcu = on_connect_makcu
+        self._on_disconnect_makcu = on_disconnect_makcu
+        self._on_toggle_tracker = on_toggle_tracker
         self._texture_id = None
         self._tex_size = (1280, 720)
         self._lock = threading.Lock()
@@ -130,21 +140,35 @@ class TrackerUI:
 
         # Loader window (shown first)
         with dpg.window(
-            tag=self._loader_win, label="Starting...", width=600, height=120, pos=(50, 50)
+            tag=self._loader_win,
+            label="Starting...",
+            width=600,
+            height=120,
+            pos=(50, 50),
         ):
             dpg.add_text("Finding OBS stream PC...", tag=self._loader_text_tag)
             dpg.add_loading_indicator()
 
         # Separate windows (hidden until first frame)
         with dpg.window(
-            tag=self._viewer_win, label="AimVal Viewer", width=960, height=720, pos=(20, 20), show=False
+            tag=self._viewer_win,
+            label="AimVal Viewer",
+            width=960,
+            height=720,
+            pos=(20, 20),
+            show=False,
         ):
             dpg.add_image(
                 "frame_tex", width=self._tex_size[0], height=self._tex_size[1]
             )
 
         with dpg.window(
-            tag=self._config_win, label="AimVal Config", width=480, height=820, pos=(1010, 20), show=False
+            tag=self._config_win,
+            label="AimVal Config",
+            width=480,
+            height=820,
+            pos=(1010, 20),
+            show=False,
         ):
             with dpg.collapsing_header(label="Config", default_open=True):
                 # Stream
@@ -163,13 +187,20 @@ class TrackerUI:
                     dpg.add_input_int(
                         label="RecvBuf MB",
                         default_value=16,
-                        callback=lambda s, a, u: self._set_udp_field(
-                            "rcvbuf_mb", a
-                        ),
+                        callback=lambda s, a, u: self._set_udp_field("rcvbuf_mb", a),
                     )
                     dpg.add_button(
                         label="Apply UDP (restart)", callback=self._apply_udp
                     )
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(
+                            label="Connect Stream", callback=self._connect_stream
+                        )
+                        dpg.add_button(
+                            label="Disconnect Stream", callback=self._disconnect_stream
+                        )
+                    dpg.add_text("Status: idle", tag="status_stream")
                 # HSV
                 with dpg.child_window(width=-1, height=260, border=True):
                     dpg.add_text("HSV")
@@ -281,8 +312,17 @@ class TrackerUI:
                     dpg.add_checkbox(
                         label="Aimbot (enable control)",
                         default_value=self.cfg.aimbot,
-                        callback=lambda s, a, u: self._set_aimbot(a),
+                        callback=lambda s, a, u: self._toggle_tracker(a),
                     )
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(
+                            label="Connect Makcu", callback=self._connect_makcu
+                        )
+                        dpg.add_button(
+                            label="Disconnect Makcu", callback=self._disconnect_makcu
+                        )
+                    dpg.add_text("Makcu: disconnected", tag="status_makcu")
                     dpg.add_checkbox(
                         label="Box (draw square)",
                         default_value=self.cfg.show_box,
@@ -298,15 +338,11 @@ class TrackerUI:
                     )
                     dpg.add_button(
                         label="Save",
-                        callback=lambda: self.save_config(
-                            dpg.get_value("cfg_path")
-                        ),
+                        callback=lambda: self.save_config(dpg.get_value("cfg_path")),
                     )
                     dpg.add_button(
                         label="Load",
-                        callback=lambda: self.load_config(
-                            dpg.get_value("cfg_path")
-                        ),
+                        callback=lambda: self.load_config(dpg.get_value("cfg_path")),
                     )
 
         dpg.setup_dearpygui()
@@ -320,6 +356,11 @@ class TrackerUI:
     def _do_show_main(self) -> None:
         dpg.configure_item(self._loader_win, show=False)
         dpg.configure_item(self._viewer_win, show=True)
+        dpg.configure_item(self._config_win, show=True)
+
+    def _do_show_config_only(self) -> None:
+        dpg.configure_item(self._loader_win, show=False)
+        dpg.configure_item(self._viewer_win, show=False)
         dpg.configure_item(self._config_win, show=True)
 
     def _do_set_loader_text(self, msg: str) -> None:
@@ -339,6 +380,9 @@ class TrackerUI:
     def request_loader_text(self, msg: str) -> None:
         self._post("set_loader_text", msg)
 
+    def request_show_config_only(self) -> None:
+        self._post("show_config_only")
+
     def render_loop(self) -> None:
         while dpg.is_dearpygui_running():
             # process queued UI actions on render thread
@@ -353,6 +397,8 @@ class TrackerUI:
                         self._do_show_main()
                     elif name == "set_loader_text":
                         self._do_set_loader_text(*args, **kwargs)
+                    elif name == "show_config_only":
+                        self._do_show_config_only()
             except Exception as e:
                 print(f"[UI] action error: {e}")
             self.update_texture()
@@ -438,3 +484,46 @@ class TrackerUI:
                 self._on_apply_udp()
             except Exception as e:
                 print(f"[UI] apply_udp error: {e}")
+
+    # Connection control handlers
+    def _connect_stream(self) -> None:
+        if self._on_connect_stream is not None:
+            try:
+                dpg.set_value("status_stream", "Status: connecting...")
+                self._on_connect_stream()
+                dpg.set_value("status_stream", "Status: connected")
+            except Exception as e:
+                dpg.set_value("status_stream", f"Status: error {e}")
+
+    def _disconnect_stream(self) -> None:
+        if self._on_disconnect_stream is not None:
+            try:
+                self._on_disconnect_stream()
+                dpg.set_value("status_stream", "Status: disconnected")
+            except Exception as e:
+                dpg.set_value("status_stream", f"Status: error {e}")
+
+    def _connect_makcu(self) -> None:
+        if self._on_connect_makcu is not None:
+            try:
+                dpg.set_value("status_makcu", "Makcu: connecting...")
+                self._on_connect_makcu()
+                dpg.set_value("status_makcu", "Makcu: connected")
+            except Exception as e:
+                dpg.set_value("status_makcu", f"Makcu: error {e}")
+
+    def _disconnect_makcu(self) -> None:
+        if self._on_disconnect_makcu is not None:
+            try:
+                self._on_disconnect_makcu()
+                dpg.set_value("status_makcu", "Makcu: disconnected")
+            except Exception as e:
+                dpg.set_value("status_makcu", f"Makcu: error {e}")
+
+    def _toggle_tracker(self, enabled: bool) -> None:
+        self._set_aimbot(enabled)
+        if self._on_toggle_tracker is not None:
+            try:
+                self._on_toggle_tracker(bool(enabled))
+            except Exception as e:
+                print(f"[UI] toggle_tracker error: {e}")

@@ -3,5 +3,7 @@ imutils
 opencv-python
 makcu
 dearpygui
+fastapi
+uvicorn
 
 
