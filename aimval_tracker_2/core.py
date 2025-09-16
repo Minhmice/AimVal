@@ -5,10 +5,12 @@ import time
 import logging
 import dxcam
 from screeninfo import get_monitors
+import ctypes
+from collections import deque
 
 from config import SharedConfig
 from hardware import MakcuController
-from detection import Detector, visualize_detection, verify_on_target
+from detection import Detector, visualize_detection, verify_on_target, draw_range_circle
 from aiming import Aimer
 from udp_source import UdpFrameSource
 
@@ -46,7 +48,21 @@ class TriggerbotCore:
 
         self.aim_target_first_seen_time = 0
         # Track optional raw viewer window lifecycle
-        self.view_window_active = False
+
+        # Rolling performance stats
+        self._frame_durations = deque(maxlen=240)
+        self._frame_latencies = deque(maxlen=240)
+        self._last_process_time = time.process_time()
+        self._last_perf_wall_time = time.time()
+
+        # Mouse button state
+        self.mouse1_pressed = False
+        self.mouse2_pressed = False
+        self.last_mouse1_time = 0.0
+        self.last_mouse2_time = 0.0
+        self.mouse1_toggle_state = False
+        self.mouse2_toggle_state = False
+        self.is_aim_active = False
 
     def setup(self):
         """Create all components and start screen capture.
@@ -54,10 +70,21 @@ class TriggerbotCore:
         Returns False on any fatal initialization error so the caller can abort.
         """
         logger.info("Setting up bot core...")
+        
+        # Debug config values
+        logger.info(f"TRIGGERBOT_ENABLED: {self.config.get('TRIGGERBOT_ENABLED')}")
+        logger.info(f"AIM_ASSIST_ENABLED: {self.config.get('AIM_ASSIST_ENABLED')}")
+        
+        # Force disable trigger bot on startup if not explicitly enabled
+        if not self.config.get("TRIGGERBOT_ENABLED"):
+            self.config.set("TRIGGERBOT_ENABLED", False)
+            logger.info("Force disabled trigger bot on startup")
         self.mouse_controller = MakcuController(self.config)
         if not self.mouse_controller.is_connected:
-            logger.error("Controller not found, setup failed.")
-            return False
+            # Allow running without hardware: enter simulation mode
+            logger.warning(
+                "Makcu controller not connected. Continuing in simulation mode."
+            )
 
         self.detector = Detector(self.config)
         self.aimer = Aimer(self.config, self.mouse_controller)
@@ -115,6 +142,193 @@ class TriggerbotCore:
 
         return True
 
+    def _get_mouse_vk(self, button_name):
+        """Get virtual key code for mouse button."""
+        if button_name.lower() == "disable":
+            return None
+        button_map = {
+            "left": 0x01,
+            "right": 0x02,
+            "middle": 0x04,
+            "mid": 0x04,
+            "mouse4": 0x05,
+            "mouse5": 0x06,
+        }
+        return button_map.get(button_name.lower(), 0x02)  # default right
+
+    def _is_mouse_button_down(self, button_name):
+        """Check if mouse button is currently pressed using Makcu ONLY."""
+        try:
+            if button_name.lower() == "disable":
+                return False
+                
+            # Check Makcu connection
+            if not self.mouse_controller or not self.mouse_controller.is_connected:
+                # Only log warning once per session to avoid spam
+                if not hasattr(self, '_makcu_warning_logged'):
+                    logger.warning("Makcu not connected - mouse buttons disabled")
+                    self._makcu_warning_logged = True
+                return False
+                
+            try:
+                import makcu
+                from makcu import MouseButton
+                
+                # Map button names to Makcu MouseButton
+                # Note: Makcu v2.2.0 supports MOUSE4, MOUSE5
+                button_map = {
+                    "left": MouseButton.LEFT,
+                    "right": MouseButton.RIGHT,
+                    "middle": MouseButton.MIDDLE,
+                    "mid": MouseButton.MIDDLE,
+                    "mouse4": MouseButton.MOUSE4,
+                    "mouse5": MouseButton.MOUSE5,
+                }
+                
+                makcu_button = button_map.get(button_name.lower())
+                if makcu_button:
+                    is_pressed = self.mouse_controller.makcu.is_pressed(makcu_button)
+                    if is_pressed:
+                        logger.debug(f"Makcu mouse button {button_name} is DOWN")
+                    return is_pressed
+                else:
+                    # mouse4/mouse5 not supported by Makcu
+                    logger.warning(f"Button {button_name} not supported by Makcu - returning False")
+                    return False
+                    
+            except Exception as makcu_error:
+                logger.error(f"Makcu button check failed: {makcu_error}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error checking mouse button {button_name}: {e}")
+            return False
+
+    def _check_mouse_toggles(self):
+        """Check mouse button toggles and update states."""
+        now = time.time()
+        
+        # Check if Makcu is connected before processing mouse buttons
+        if not self.mouse_controller or not self.mouse_controller.is_connected:
+            # If Makcu disconnected, reset all states to OFF
+            if self.mouse1_toggle_state or self.mouse2_toggle_state or self.is_aim_active:
+                logger.info("Makcu disconnected - resetting all mouse states to OFF")
+                self.mouse1_toggle_state = False
+                self.mouse2_toggle_state = False
+                self.is_aim_active = False
+            return
+        
+        # Mouse 1 button (default: right mouse button)
+        mouse1_button = self.config.get("MOUSE_1_BUTTON", "right")
+        mouse1_mode = self.config.get("MOUSE_1_MODE", "toggle")
+        mouse1_down = self._is_mouse_button_down(mouse1_button)
+        
+        # Debug mouse button detection
+        if mouse1_down:
+            logger.debug(f"Mouse 1 ({mouse1_button}) is DOWN - Mode: {mouse1_mode}")
+        
+        if mouse1_mode == "toggle":
+            # Toggle mode: press to toggle on/off
+            if mouse1_down and not self.mouse1_pressed and (now - self.last_mouse1_time) > 0.2:
+                old_state = self.mouse1_toggle_state
+                self.mouse1_toggle_state = not self.mouse1_toggle_state
+                self.mouse1_pressed = True
+                self.last_mouse1_time = now
+                logger.info(f"Mouse 1 ({mouse1_button}): Toggle {old_state} -> {self.mouse1_toggle_state}")
+            elif not mouse1_down:
+                self.mouse1_pressed = False
+        else:
+            # Hold mode: active while held
+            old_state = self.mouse1_toggle_state
+            self.mouse1_toggle_state = mouse1_down
+            if mouse1_down and not self.mouse1_pressed:
+                logger.info(f"Mouse 1 ({mouse1_button}): Hold ON")
+                self.mouse1_pressed = True
+            elif not mouse1_down and self.mouse1_pressed:
+                logger.info(f"Mouse 1 ({mouse1_button}): Hold OFF")
+                self.mouse1_pressed = False
+            # Log state change for hold mode
+            if old_state != self.mouse1_toggle_state:
+                logger.info(f"Mouse 1 ({mouse1_button}): State changed to {self.mouse1_toggle_state}")
+            
+        # Mouse 2 button (default: left)
+        mouse2_button = self.config.get("MOUSE_2_BUTTON", "left")
+        mouse2_mode = self.config.get("MOUSE_2_MODE", "hold")
+        mouse2_down = self._is_mouse_button_down(mouse2_button)
+        
+        # Debug mouse button detection
+        if mouse2_down:
+            logger.debug(f"Mouse 2 ({mouse2_button}) is DOWN - Mode: {mouse2_mode}")
+        
+        if mouse2_mode == "toggle":
+            # Toggle mode: press to toggle on/off
+            if mouse2_down and not self.mouse2_pressed and (now - self.last_mouse2_time) > 0.2:
+                old_state = self.mouse2_toggle_state
+                self.mouse2_toggle_state = not self.mouse2_toggle_state
+                self.mouse2_pressed = True
+                self.last_mouse2_time = now
+                logger.info(f"Mouse 2 ({mouse2_button}): Toggle {old_state} -> {self.mouse2_toggle_state}")
+            elif not mouse2_down:
+                self.mouse2_pressed = False
+        else:
+            # Hold mode: active while held
+            old_state = self.mouse2_toggle_state
+            self.mouse2_toggle_state = mouse2_down
+            if mouse2_down and not self.mouse2_pressed:
+                logger.info(f"Mouse 2 ({mouse2_button}): Hold ON")
+                self.mouse2_pressed = True
+            elif not mouse2_down and self.mouse2_pressed:
+                logger.info(f"Mouse 2 ({mouse2_button}): Hold OFF")
+                self.mouse2_pressed = False
+            # Log state change for hold mode
+            if old_state != self.mouse2_toggle_state:
+                logger.info(f"Mouse 2 ({mouse2_button}): State changed to {self.mouse2_toggle_state}")
+        
+        # Update aim bot state: either button can activate (OR logic)
+        old_aim_state = self.is_aim_active
+        self.is_aim_active = self.mouse1_toggle_state or self.mouse2_toggle_state
+        
+        # Log aim state changes
+        if old_aim_state != self.is_aim_active:
+            logger.info(f"Aim bot: {old_aim_state} -> {self.is_aim_active} (Mouse1: {self.mouse1_toggle_state}, Mouse2: {self.mouse2_toggle_state})")
+
+    def monitor_performance(self):
+        """Return dict with cpu_percent, ram_mb, avg_fps, avg_latency_ms."""
+        # FPS from rolling durations
+        avg_dt = np.mean(self._frame_durations) if self._frame_durations else 0.0
+        avg_fps = (1.0 / avg_dt) if avg_dt > 0 else 0.0
+        avg_latency_ms = (
+            float(np.mean(self._frame_latencies) * 1000.0)
+            if self._frame_latencies
+            else 0.0
+        )
+
+        # CPU% approx from process_time delta over wall delta
+        now_pt = time.process_time()
+        now_wall = time.time()
+        dt_pt = max(1e-6, now_pt - self._last_process_time)
+        dt_wall = max(1e-6, now_wall - self._last_perf_wall_time)
+        cpu_percent = min(100.0, max(0.0, (dt_pt / dt_wall) * 100.0))
+        self._last_process_time = now_pt
+        self._last_perf_wall_time = now_wall
+
+        # RAM (optional psutil)
+        ram_mb = 0.0
+        try:
+            import psutil  # type: ignore
+
+            p = psutil.Process()
+            ram_mb = p.memory_info().rss / (1024 * 1024)
+        except Exception:
+            ram_mb = 0.0
+
+        return {
+            "cpu_percent": cpu_percent,
+            "ram_mb": ram_mb,
+            "avg_fps": avg_fps,
+            "avg_latency_ms": avg_latency_ms,
+        }
+
     def shoot_burst(self, duration):
         """Start a non-blocking shot: press then release after duration seconds."""
         if self.mouse_controller:
@@ -136,7 +350,8 @@ class TriggerbotCore:
         frame_start_time = time.perf_counter()
         try:
             show_debug = self.config.get("DEBUG_WINDOW_VISIBLE")
-            show_view = self.config.get("VIEW_SCREEN_VISIBLE")
+            show_view = False  # View screen removed
+            show_hud = bool(self.config.get("HUD_SHOW_AIM_STATUS"))
 
             # Fetch latest frame early so we can derive current dimensions
             frame = self.camera.get_latest_frame()
@@ -144,7 +359,10 @@ class TriggerbotCore:
                 cur_h, cur_w = frame.shape[:2]
             else:
                 # If we have a capture region (dxcam), derive size from it; else default
-                if isinstance(self.capture_region, tuple) and len(self.capture_region) == 4:
+                if (
+                    isinstance(self.capture_region, tuple)
+                    and len(self.capture_region) == 4
+                ):
                     cur_w = self.capture_region[2] - self.capture_region[0]
                     cur_h = self.capture_region[3] - self.capture_region[1]
                 else:
@@ -162,35 +380,8 @@ class TriggerbotCore:
                 cv2.destroyAllWindows()
                 self.debug_windows_active = False
 
-            # Optional raw frame viewer window lifecycle
-            if show_view and not self.view_window_active:
-                try:
-                    cv2.namedWindow("View: Frame", cv2.WINDOW_NORMAL)
-                    cv2.moveWindow("View: Frame", 50, 50)
-                    try:
-                        cv2.setWindowProperty("View: Frame", cv2.WND_PROP_TOPMOST, 1)
-                    except cv2.error:
-                        pass
-                    self.view_window_active = True
-                except cv2.error:
-                    self.view_window_active = False
-            elif not show_view and self.view_window_active:
-                try:
-                    cv2.destroyWindow("View: Frame")
-                except cv2.error:
-                    pass
-                self.view_window_active = False
-
             # If no valid frame, render placeholders and skip
             if frame is None or not hasattr(frame, "shape") or frame.size == 0:
-                if show_view and self.view_window_active:
-                    try:
-                        placeholder = np.zeros((cur_h, cur_w, 3), dtype=np.uint8)
-                        cv2.putText(placeholder, "WAITING UDP...", (10, max(20, cur_h - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                        cv2.imshow("View: Frame", placeholder)
-                    except cv2.error:
-                        pass
-                    cv2.waitKey(1)
                 if show_debug:
                     black_screen = np.zeros((cur_h, cur_w, 3), dtype=np.uint8)
                     cv2.putText(
@@ -219,22 +410,38 @@ class TriggerbotCore:
                 processed_mask, crosshair_x, crosshair_y, scan_height, scan_width
             )
 
-            if self.config.get("TRIGGERBOT_ENABLED"):
+            # Check mouse button toggles
+            self._check_mouse_toggles()
+
+            # Triggerbot: only when enabled
+            trigger_enabled = self.config.get("TRIGGERBOT_ENABLED")
+            if trigger_enabled:
+                logger.debug("Trigger bot is ENABLED - checking for targets")
                 if is_on_target:
                     if self.trigger_activated_at == 0:
                         self.trigger_activated_at = time.time()
+                        logger.debug("Trigger activated - on target detected")
 
                     delay_ms = self.config.get("TRIGGERBOT_DELAY_MS")
                     if (time.time() - self.trigger_activated_at) * 1000 >= delay_ms:
                         shot_d = self.config.get("SHOT_DURATION")
                         shot_c = self.config.get("SHOT_COOLDOWN")
                         if (time.time() - self.last_shot_time) > (shot_d + shot_c):
+                            logger.info("TRIGGER BOT: Firing shot!")
                             self.shoot_burst(shot_d)
                             self.last_shot_time = time.time()
                 else:
+                    if self.trigger_activated_at != 0:
+                        logger.debug("Trigger deactivated - off target")
                     self.trigger_activated_at = 0
+            else:
+                # Reset trigger when not enabled
+                if self.trigger_activated_at != 0:
+                    logger.debug("Trigger reset - triggerbot disabled")
+                self.trigger_activated_at = 0
 
-            if self.config.get("AIM_ASSIST_ENABLED"):
+            # Aim assist: only when enabled
+            if self.is_aim_active:
                 target_in_range = None
                 if potential_targets:
                     distances = [
@@ -262,28 +469,6 @@ class TriggerbotCore:
                     self.aim_target_first_seen_time = 0
                     self.aimer.stop_aim()
 
-            if show_view and self.view_window_active:
-                try:
-                    # Overlay simple UDP stats if source is UDP
-                    if isinstance(self.camera, UdpFrameSource):
-                        stats = self.camera.get_stats()
-                        now_ns = time.monotonic_ns()
-                        last_pkt_ms = (now_ns - stats.get("last_packet_ns", 0)) / 1e6 if stats.get("last_packet_ns", 0) else -1
-                        last_frm_ms = (now_ns - stats.get("last_frame_ns", 0)) / 1e6 if stats.get("last_frame_ns", 0) else -1
-                        overlay = frame.copy()
-                        msg1 = f"pkts:{stats['packets']} bytes:{stats['bytes']} frames:{stats['frames']}"
-                        msg2 = f"lastPkt:{last_pkt_ms:.0f}ms lastFrm:{last_frm_ms:.0f}ms"
-                        msg3 = f"rt:{stats['rt_ms']:.1f}ms {stats['rt_fps']:.1f}fps avg:{stats['avg_ms']:.1f}ms {stats['avg_fps']:.1f}fps"
-                        cv2.putText(overlay, msg1, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
-                        cv2.putText(overlay, msg2, (8, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
-                        cv2.putText(overlay, msg3, (8, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
-                        cv2.imshow("View: Frame", overlay)
-                    else:
-                        cv2.imshow("View: Frame", frame)
-                except cv2.error:
-                    pass
-                cv2.waitKey(1)
-
             if show_debug:
                 mask_display = cv2.cvtColor(processed_mask, cv2.COLOR_GRAY2BGR)
                 vision_display = visualize_detection(frame.copy(), potential_targets)
@@ -308,13 +493,21 @@ class TriggerbotCore:
                         trigger_color,
                         1,
                     )
+
+                # Add range circle to debug vision window
+                try:
+                    vision_display = draw_range_circle(
+                        vision_display,
+                        (crosshair_x, crosshair_y),
+                        int(self.config.get("AIM_ASSIST_RANGE")),
+                    )
+                except Exception:
+                    pass
+
                 cv2.imshow(self.wnd_mask, mask_display)
                 cv2.imshow(self.wnd_vision, vision_display)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     self.config.set("is_running", False)
-            elif show_view:
-                # Ensure HighGUI event loop processes for the view window
-                cv2.waitKey(1)
 
         except Exception as e:
             logger.exception("An unhandled exception occurred during a frame run")
@@ -328,6 +521,17 @@ class TriggerbotCore:
                 sleep_time = target_frame_time - elapsed_time
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+
+            # Record perf stats
+            try:
+                total_dt = time.perf_counter() - frame_start_time
+                self._frame_durations.append(total_dt)
+                if isinstance(self.camera, UdpFrameSource):
+                    stats = self.camera.get_stats()
+                    rt_ms = stats.get("rt_ms", 0.0)
+                    self._frame_latencies.append(rt_ms / 1000.0)
+            except Exception:
+                pass
 
     def cleanup(self):
         """Stop aiming, stop capture, close windows, and disconnect hardware."""

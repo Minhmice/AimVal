@@ -94,3 +94,21 @@ def visualize_detection(debug_img, targets):
         cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
         cv2.circle(debug_img, target["center"], 3, (0, 0, 255), -1)
     return debug_img
+
+
+def draw_range_circle(frame, center, radius):
+    """Vẽ vòng tròn cyan quanh tâm để debug phạm vi aim.
+
+    Args:
+        frame: ảnh BGR (numpy array)
+        center: tuple (x, y) tâm vòng tròn
+        radius: bán kính (pixel)
+    """
+    try:
+        x, y = int(center[0]), int(center[1])
+        r = max(1, int(radius))
+        # Cyan in BGR: (255, 255, 0)
+        cv2.circle(frame, (x, y), r, (255, 255, 0), 1, lineType=cv2.LINE_AA)
+    except Exception:
+        pass
+    return frame

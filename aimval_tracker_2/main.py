@@ -43,8 +43,67 @@ class ControlPanelGUI(ttk.Window):
         self.geometry("550x950")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        top_frame = ttk.Frame(self, padding=10)
-        top_frame.pack(fill=X)
+        # Create main container with sticky header
+        main_container = ttk.Frame(self)
+        main_container.pack(fill=BOTH, expand=True)
+
+        # Sticky Header - always visible at top with modern styling
+        header_frame = ttk.Frame(main_container, padding=(15, 10))
+        header_frame.pack(fill=X, side=TOP, pady=(0, 5))
+
+        # Add subtle border to header
+        header_frame.configure(relief="solid", borderwidth=1)
+
+        # First line: Performance metrics
+        perf_frame = ttk.Frame(header_frame)
+        perf_frame.pack(fill=X)
+        self.header_perf_label = ttk.Label(
+            perf_frame,
+            text="CPU: -  RAM: -  FPS: -  Lat: -",
+            foreground="gray",
+        )
+        self.header_perf_label.pack(side=LEFT)
+
+        # Second line: Makcu and PC1 status
+        status_frame = ttk.Frame(header_frame)
+        status_frame.pack(fill=X, pady=(2, 0))
+        self.header_makcu_label = ttk.Label(status_frame, text="Makcu: Disconnected")
+        self.header_makcu_label.pack(side=LEFT)
+
+        self.header_pc1_label = ttk.Label(status_frame, text="PC1: No Signal")
+        self.header_pc1_label.pack(side=LEFT, padx=(20, 0))
+
+        # Third line: Bot status display
+        status_frame = ttk.Frame(header_frame)
+        status_frame.pack(fill=X, pady=(2, 0))
+        self.header_bot_status_label = ttk.Label(
+            status_frame, text="Aim: OFF  Mouse1: OFF  Mouse2: OFF", foreground="gray"
+        )
+        self.header_bot_status_label.pack(side=LEFT)
+
+        # Control buttons - also sticky with modern styling
+        top_frame = ttk.Frame(main_container, padding=(15, 10))
+        top_frame.pack(fill=X, side=TOP, pady=(0, 5))
+
+        # Enable Trigger Bot button
+        trigger_frame = ttk.Frame(top_frame)
+        trigger_frame.pack(side=LEFT, padx=(0, 10))
+        ttk.Label(trigger_frame, text="Enable Trigger Bot:").pack(
+            side=LEFT, padx=(0, 5)
+        )
+        self.trigger_enabled_var = tk.BooleanVar(
+            value=self.config.get("TRIGGERBOT_ENABLED")
+        )
+        self.widget_vars["TRIGGERBOT_ENABLED"] = self.trigger_enabled_var
+        trigger_check = ttk.Checkbutton(
+            trigger_frame,
+            variable=self.trigger_enabled_var,
+            command=self._on_trigger_toggle,
+        )
+        trigger_check.pack(side=LEFT)
+
+        # Add subtle border to control area
+        top_frame.configure(relief="solid", borderwidth=1)
         self.start_button = ttk.Button(
             top_frame, text="Start", command=self.start_bot, bootstyle=SUCCESS
         )
@@ -69,18 +128,6 @@ class ControlPanelGUI(ttk.Window):
             ),
         )
         debug_check.pack(side=RIGHT)
-        self.view_var = tk.BooleanVar(value=self.config.get("VIEW_SCREEN_VISIBLE"))
-        self.widget_vars["VIEW_SCREEN_VISIBLE"] = self.view_var
-        view_check = ttk.Checkbutton(
-            top_frame,
-            text="View Screen",
-            variable=self.view_var,
-            bootstyle="round-toggle",
-            command=lambda: self.config.set(
-                "VIEW_SCREEN_VISIBLE", self.view_var.get()
-            ),
-        )
-        view_check.pack(side=RIGHT, padx=(0, 8))
         # Log toggle changes
         self.debug_var.trace_add(
             "write",
@@ -88,31 +135,106 @@ class ControlPanelGUI(ttk.Window):
                 "UI: DEBUG_WINDOW_VISIBLE=%s", bool(self.debug_var.get())
             ),
         )
-        self.view_var.trace_add(
-            "write",
-            lambda *args: logging.info(
-                "UI: VIEW_SCREEN_VISIBLE=%s", bool(self.view_var.get())
-            ),
-        )
 
-        notebook = ttk.Notebook(self, padding=10)
-        notebook.pack(fill=BOTH, expand=YES)
+        # Create notebook (tabs) - sticky at top
+        notebook = ttk.Notebook(main_container, padding=10)
+        notebook.pack(fill=BOTH, expand=True, pady=(0, 5))
 
+        # Create tab content frames - directly as children of notebook
         main_tab = ttk.Frame(notebook)
-        notebook.add(main_tab, text=" Main ")
         aiming_tab = ttk.Frame(notebook)
-        notebook.add(aiming_tab, text=" Aiming ")
         detection_tab = ttk.Frame(notebook)
-        notebook.add(detection_tab, text=" Detection ")
         advanced_tab = ttk.Frame(notebook)
+
+        # Add tabs to notebook
+        notebook.add(main_tab, text=" Main ")
+        notebook.add(aiming_tab, text=" Aiming ")
+        notebook.add(detection_tab, text=" Detection ")
         notebook.add(advanced_tab, text=" Advanced ")
 
-        self.populate_main_tab(main_tab)
-        self.populate_aiming_tab(aiming_tab)
-        self.populate_detection_tab(detection_tab)
-        self.populate_advanced_tab(advanced_tab)
+        # Configure grid weights for responsive behavior
+        main_tab.grid_columnconfigure(0, weight=1)
+        aiming_tab.grid_columnconfigure(0, weight=1)
+        detection_tab.grid_columnconfigure(0, weight=1)
+        advanced_tab.grid_columnconfigure(0, weight=1)
+
+        # Create scrollable content for each tab
+        self._create_scrollable_tab(main_tab, "main")
+        self._create_scrollable_tab(aiming_tab, "aiming")
+        self._create_scrollable_tab(detection_tab, "detection")
+        self._create_scrollable_tab(advanced_tab, "advanced")
+        # Make window responsive
+        self.bind("<Configure>", self._on_window_resize)
+
         self._update_gui_from_config()
         self._start_health_logger()
+
+    def _toggle_aim_bot(self):
+        """Toggle aim bot on/off."""
+        if self.bot_instance:
+            self.bot_instance.is_aim_active = self.aim_bot_var.get()
+            logging.info(
+                f"Aim bot {'enabled' if self.aim_bot_var.get() else 'disabled'}"
+            )
+
+    def _on_trigger_toggle(self):
+        """Handle trigger bot toggle from GUI."""
+        enabled = self.trigger_enabled_var.get()
+        self.config.set("TRIGGERBOT_ENABLED", enabled)
+        logging.info(f"Trigger bot {'enabled' if enabled else 'disabled'} via GUI")
+        
+    def _toggle_trigger_bot(self):
+        """Toggle trigger bot on/off."""
+        if self.bot_instance:
+            self.config.set("TRIGGERBOT_ENABLED", self.trigger_enabled_var.get())
+            logging.info(
+                f"Trigger bot {'enabled' if self.trigger_enabled_var.get() else 'disabled'}"
+            )
+
+    def _create_scrollable_tab(self, parent_tab, tab_name):
+        """Create a scrollable area within a tab."""
+        # Create canvas and scrollbar for this tab
+        canvas = tk.Canvas(parent_tab, highlightthickness=0, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(parent_tab, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        def configure_scroll_region(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack canvas and scrollbar
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill=Y)
+
+        # Bind mousewheel to canvas
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
+
+        # Configure grid weights
+        scrollable_frame.grid_columnconfigure(0, weight=1)
+
+        # Populate the tab content
+        if tab_name == "main":
+            self.populate_main_tab(scrollable_frame)
+        elif tab_name == "aiming":
+            self.populate_aiming_tab(scrollable_frame)
+        elif tab_name == "detection":
+            self.populate_detection_tab(scrollable_frame)
+        elif tab_name == "advanced":
+            self.populate_advanced_tab(scrollable_frame)
 
     def populate_main_tab(self, parent):
         """Build Main tab: config file actions, global toggles, FPS and FOV."""
@@ -129,22 +251,6 @@ class ControlPanelGUI(ttk.Window):
         ttk.Button(config_frame, text="Load", command=self._load_config_dialog).pack(
             side=LEFT
         )
-
-        toggles_frame = ttk.LabelFrame(parent, text="Global Toggles", padding=10)
-        toggles_frame.pack(fill=X, pady=5, padx=5)
-        for key, text in {
-            "AIM_ASSIST_ENABLED": "Enable Aim Assist",
-            "TRIGGERBOT_ENABLED": "Enable Triggerbot",
-        }.items():
-            var = tk.BooleanVar(value=self.config.get(key))
-            self.widget_vars[key] = var
-            ttk.Checkbutton(
-                toggles_frame,
-                text=text,
-                variable=var,
-                bootstyle="round-toggle",
-                command=lambda k=key, v=var: self.config.set(k, v.get()),
-            ).pack(anchor=W, padx=5, pady=2)
 
         core_frame = ttk.LabelFrame(parent, text="Core Settings", padding=10)
         core_frame.pack(fill=X, pady=5, padx=5)
@@ -235,6 +341,48 @@ class ControlPanelGUI(ttk.Window):
             "In-Game Sens",
             0.200,
             0.900,
+            is_float=True,
+        )
+
+        # Mouse Speed Controls
+        mouse_speed_frame = ttk.LabelFrame(
+            self.classic_aim_frame, text="Mouse Speed", padding=10
+        )
+        mouse_speed_frame.pack(fill=X, pady=5, padx=5)
+        self.create_slider(
+            mouse_speed_frame,
+            "MOUSE_SPEED_MULTIPLIER",
+            "Speed x",
+            0.5,
+            5.0,
+            is_float=True,
+        )
+        self.create_slider(
+            mouse_speed_frame,
+            "MOUSE_STEP_DELAY_MS",
+            "Step Delay (ms)",
+            1,
+            10,
+        )
+
+        # Ease out checkbox
+        ease_frame = ttk.Frame(mouse_speed_frame)
+        ease_frame.pack(fill=X, pady=2)
+        self.ease_out_var = tk.BooleanVar(value=self.config.get("MOUSE_EASE_OUT"))
+        self.widget_vars["MOUSE_EASE_OUT"] = self.ease_out_var
+        ttk.Checkbutton(
+            ease_frame,
+            text="Ease Out (slower near target)",
+            variable=self.ease_out_var,
+            command=lambda: self.config.set("MOUSE_EASE_OUT", self.ease_out_var.get()),
+        ).pack(anchor=W)
+
+        self.create_slider(
+            mouse_speed_frame,
+            "MOUSE_SMOOTHNESS",
+            "Smoothness",
+            0.1,
+            1.0,
             is_float=True,
         )
 
@@ -341,7 +489,7 @@ class ControlPanelGUI(ttk.Window):
 
         common_frame = ttk.LabelFrame(parent, text="Common Aim Settings", padding=10)
         common_frame.pack(fill=X, pady=5, padx=5)
-        self.create_slider(common_frame, "AIM_ASSIST_RANGE", "Range (px)", 10, 60)
+        self.create_slider(common_frame, "AIM_ASSIST_RANGE", "Range (px)", 10, 100)
         self.create_slider(
             common_frame, "AIM_ASSIST_DELAY", "Aim Delay (s)", 0.0, 0.5, is_float=True
         )
@@ -428,6 +576,72 @@ class ControlPanelGUI(ttk.Window):
         )
         self.create_slider(
             fire_control_frame, "TRIGGERBOT_DELAY_MS", "Trig. Delay", 0, 120
+        )
+
+        # Mouse Button Settings
+        mouse_button_frame = ttk.LabelFrame(parent, text="Mouse Buttons", padding=10)
+        mouse_button_frame.pack(fill=X, pady=5, padx=5)
+
+        # Mouse 1 button
+        mouse1_frame = ttk.Frame(mouse_button_frame)
+        mouse1_frame.pack(fill=X, pady=2)
+        ttk.Label(mouse1_frame, text="Mouse 1", width=12).pack(side=LEFT)
+        self.mouse1_var = tk.StringVar(value=self.config.get("MOUSE_1_BUTTON"))
+        self.widget_vars["MOUSE_1_BUTTON"] = self.mouse1_var
+        ttk.Combobox(
+            mouse1_frame,
+            textvariable=self.mouse1_var,
+            values=["left", "right", "mid", "mouse4", "mouse5", "disable"],
+            state="readonly",
+            width=8,
+        ).pack(side=LEFT, padx=(0, 5))
+        self.mouse1_mode_var = tk.StringVar(value=self.config.get("MOUSE_1_MODE"))
+        self.widget_vars["MOUSE_1_MODE"] = self.mouse1_mode_var
+        ttk.Combobox(
+            mouse1_frame,
+            textvariable=self.mouse1_mode_var,
+            values=["toggle", "hold"],
+            state="readonly",
+            width=8,
+        ).pack(side=LEFT, padx=(0, 10))
+        self.mouse1_var.trace_add(
+            "write",
+            lambda *args: self.config.set("MOUSE_1_BUTTON", self.mouse1_var.get()),
+        )
+        self.mouse1_mode_var.trace_add(
+            "write",
+            lambda *args: self.config.set("MOUSE_1_MODE", self.mouse1_mode_var.get()),
+        )
+
+        # Mouse 2 button
+        mouse2_frame = ttk.Frame(mouse_button_frame)
+        mouse2_frame.pack(fill=X, pady=2)
+        ttk.Label(mouse2_frame, text="Mouse 2", width=12).pack(side=LEFT)
+        self.mouse2_var = tk.StringVar(value=self.config.get("MOUSE_2_BUTTON"))
+        self.widget_vars["MOUSE_2_BUTTON"] = self.mouse2_var
+        ttk.Combobox(
+            mouse2_frame,
+            textvariable=self.mouse2_var,
+            values=["left", "right", "mid", "mouse4", "mouse5", "disable"],
+            state="readonly",
+            width=8,
+        ).pack(side=LEFT, padx=(0, 5))
+        self.mouse2_mode_var = tk.StringVar(value=self.config.get("MOUSE_2_MODE"))
+        self.widget_vars["MOUSE_2_MODE"] = self.mouse2_mode_var
+        ttk.Combobox(
+            mouse2_frame,
+            textvariable=self.mouse2_mode_var,
+            values=["toggle", "hold"],
+            state="readonly",
+            width=8,
+        ).pack(side=LEFT, padx=(0, 10))
+        self.mouse2_var.trace_add(
+            "write",
+            lambda *args: self.config.set("MOUSE_2_BUTTON", self.mouse2_var.get()),
+        )
+        self.mouse2_mode_var.trace_add(
+            "write",
+            lambda *args: self.config.set("MOUSE_2_MODE", self.mouse2_mode_var.get()),
         )
 
     def _on_aim_mode_change(self, event=None):
@@ -591,6 +805,10 @@ class ControlPanelGUI(ttk.Window):
         if self.bot_instance is not None:
             return
 
+        # Enable aim assist when starting (triggerbot controlled by GUI)
+        self.config.set("AIM_ASSIST_ENABLED", True)
+        # Don't force enable triggerbot - let user control via GUI
+
         # Log startup configuration snapshot
         try:
             src = self.config.get("FRAME_SOURCE")
@@ -601,7 +819,12 @@ class ControlPanelGUI(ttk.Window):
             fov = self.config.get("FOV_RESOLUTION")
             logging.info(
                 "Starting core with FRAME_SOURCE=%s, UDP=%s:%s bufMB=%s turbo=%s, FOV=%s",
-                src, udp_host, udp_port, udp_buf, udp_turbo, fov,
+                src,
+                udp_host,
+                udp_port,
+                udp_buf,
+                udp_turbo,
+                fov,
             )
         except Exception:
             pass
@@ -658,12 +881,24 @@ class ControlPanelGUI(ttk.Window):
         try:
             running = bool(self.config.get("is_running"))
             source = self.config.get("FRAME_SOURCE")
-            cam = getattr(self.bot_instance, "camera", None) if self.bot_instance else None
+            cam = (
+                getattr(self.bot_instance, "camera", None)
+                if self.bot_instance
+                else None
+            )
             if source == "udp" and cam is not None and isinstance(cam, UdpFrameSource):
                 stats = cam.get_stats()
                 now_ns = time.monotonic_ns()
-                last_pkt_ms = (now_ns - stats.get("last_packet_ns", 0)) / 1e6 if stats.get("last_packet_ns", 0) else -1
-                last_frm_ms = (now_ns - stats.get("last_frame_ns", 0)) / 1e6 if stats.get("last_frame_ns", 0) else -1
+                last_pkt_ms = (
+                    (now_ns - stats.get("last_packet_ns", 0)) / 1e6
+                    if stats.get("last_packet_ns", 0)
+                    else -1
+                )
+                last_frm_ms = (
+                    (now_ns - stats.get("last_frame_ns", 0)) / 1e6
+                    if stats.get("last_frame_ns", 0)
+                    else -1
+                )
                 packets = stats.get("packets", 0)
                 frames = stats.get("frames", 0)
                 rt_ms = stats.get("rt_ms", 0.0)
@@ -673,31 +908,136 @@ class ControlPanelGUI(ttk.Window):
 
                 # Emit logs with clear diagnostics
                 if packets == 0:
-                    logging.warning("UDP: no packets received yet (running=%s)", running)
-                elif frames == 0:
-                    logging.warning("UDP: packets=%s bytes=%s but frames=0 (not MJPEG?)", packets, stats.get("bytes", 0))
-                elif last_pkt_ms > 2000 or last_frm_ms > 2000:
-                    logging.warning("UDP: stalled stream lastPkt=%.0fms lastFrm=%.0fms", last_pkt_ms, last_frm_ms)
-                else:
-                    logging.info(
-                        "UDP: pkts=%s bytes=%s frames=%s rt=%.1fms %.1ffps avg=%.1fms %.1ffps lastPkt=%.0fms lastFrm=%.0fms",
-                        packets, stats.get("bytes", 0), frames, rt_ms, rt_fps, avg_ms, avg_fps, last_pkt_ms, last_frm_ms,
+                    logging.warning(
+                        "UDP: no packets received yet (running=%s)", running
                     )
+                elif frames == 0:
+                    logging.warning(
+                        "UDP: packets=%s bytes=%s but frames=0 (not MJPEG?)",
+                        packets,
+                        stats.get("bytes", 0),
+                    )
+                elif last_pkt_ms > 2000 or last_frm_ms > 2000:
+                    logging.warning(
+                        "UDP: stalled stream lastPkt=%.0fms lastFrm=%.0fms",
+                        last_pkt_ms,
+                        last_frm_ms,
+                    )
+                else:
+                    # UDP stats now shown in GUI header, no need to log
+                    pass
             else:
                 # For dxcam or not running, still checkpoint occasionally
-                logging.debug("Health: running=%s source=%s cam=%s", running, source, cam.__class__.__name__ if cam else None)
+                logging.debug(
+                    "Health: running=%s source=%s cam=%s",
+                    running,
+                    source,
+                    cam.__class__.__name__ if cam else None,
+                )
         except Exception as e:
             logging.exception("Health logger tick failed")
         finally:
             try:
+                # Update header performance label if core is running
+                try:
+                    if self.bot_instance is not None and hasattr(
+                        self.bot_instance, "monitor_performance"
+                    ):
+                        perf = self.bot_instance.monitor_performance()
+                        aim_status = "ON" if self.bot_instance.is_aim_active else "OFF"
+                        aim_color = (
+                            "green" if self.bot_instance.is_aim_active else "red"
+                        )
+                        self.header_perf_label.config(
+                            text=f"CPU: {perf['cpu_percent']:.0f}%  RAM: {perf['ram_mb']:.0f}MB  FPS: {perf['avg_fps']:.0f}  Lat: {perf['avg_latency_ms']:.1f}ms  AIM: {aim_status}",
+                            foreground=aim_color,
+                        )
+
+                        # Update Makcu status
+                        makcu_status = (
+                            "Connected"
+                            if (
+                                hasattr(self.bot_instance, "mouse_controller")
+                                and self.bot_instance.mouse_controller
+                                and getattr(
+                                    self.bot_instance.mouse_controller,
+                                    "is_connected",
+                                    False,
+                                )
+                            )
+                            else "Disconnected"
+                        )
+                        self.header_makcu_label.config(text=f"Makcu: {makcu_status}")
+
+                        # Update PC1 status with IP address
+                        pc1_ip = "No Signal"
+                        if (
+                            hasattr(self.bot_instance, "camera")
+                            and self.bot_instance.camera
+                            and hasattr(self.bot_instance.camera, "get_latest_frame")
+                        ):
+                            frame = self.bot_instance.camera.get_latest_frame()
+                            if frame is not None:
+                                # Try to get IP from UDP source
+                                if hasattr(self.bot_instance.camera, "get_stats"):
+                                    stats = self.bot_instance.camera.get_stats()
+                                    if (
+                                        "last_sender_ip" in stats
+                                        and stats["last_sender_ip"]
+                                    ):
+                                        pc1_ip = stats["last_sender_ip"]
+                                    elif "sender_ip" in stats and stats["sender_ip"]:
+                                        pc1_ip = stats["sender_ip"]
+                                    else:
+                                        pc1_ip = "Signal (Unknown IP)"
+                                else:
+                                    pc1_ip = "Signal (Unknown IP)"
+                        self.header_pc1_label.config(text=f"PC1: {pc1_ip}")
+
+                        # Update bot status
+                        aim_status = "ON" if self.bot_instance.is_aim_active else "OFF"
+                        mouse1_status = (
+                            "ON"
+                            if getattr(self.bot_instance, "mouse1_toggle_state", False)
+                            else "OFF"
+                        )
+                        mouse2_status = (
+                            "ON"
+                            if getattr(self.bot_instance, "mouse2_toggle_state", False)
+                            else "OFF"
+                        )
+                        aim_color = (
+                            "green" if self.bot_instance.is_aim_active else "red"
+                        )
+
+                        # Update status text
+                        status_text = f"Aim: {aim_status}  Mouse1: {mouse1_status}  Mouse2: {mouse2_status}"
+                        self.header_bot_status_label.config(
+                            text=status_text, foreground=aim_color
+                        )
+
+                except Exception:
+                    pass
                 self.health_log_job = self.after(1500, self._health_log_tick)
             except Exception:
+                pass
+
+    def _on_window_resize(self, event):
+        """Handle window resize to make UI responsive."""
+        if event.widget == self:
+            # Update any scrollable areas when window resizes
+            try:
+                # Force update of all widgets
+                self.update_idletasks()
+            except:
                 pass
 
     def on_closing(self):
         """Ensure the core stops before closing the window."""
         if self.config.get("is_running"):
             self.stop_bot()
+        # Unbind mousewheel to prevent memory leaks
+        self.unbind_all("<MouseWheel>")
         self.destroy()
 
 

@@ -1,5 +1,19 @@
 import logging
 from makcu import create_controller, MouseButton, MakcuConnectionError
+try:
+    # Some versions expose timeout under makcu.errors
+    from makcu.errors import MakcuTimeoutError  # type: ignore
+except Exception:  # pragma: no cover - optional import
+    MakcuTimeoutError = Exception  # fallback to generic Exception type
+try:
+    # Serial exceptions raised by pyserial on Windows
+    from serial import SerialException, SerialTimeoutException  # type: ignore
+except Exception:  # pragma: no cover - optional import
+    class SerialException(Exception):
+        pass
+
+    class SerialTimeoutException(Exception):
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +32,11 @@ class MakcuController:
         self.makcu_lib = None
         self.is_connected = False
         self._connect()
+    
+    @property
+    def makcu(self):
+        """Expose the makcu library object for button state checking."""
+        return self.makcu_lib
 
     def _connect(self):
         """Establish connection to the Makcu device via the vendor library."""
@@ -29,8 +48,14 @@ class MakcuController:
             self.is_connected = self.makcu_lib.is_connected()
             if self.is_connected:
                 logger.info(
-                    "Successfully connected to Makcu device using makcu-py-lib."
+                    "Successfully connected to Makcu device using makcu-py-lib v2.2.0"
                 )
+                # Get device info for debugging
+                try:
+                    device_info = self.makcu_lib.get_device_info()
+                    logger.info(f"Makcu device info: {device_info}")
+                except Exception:
+                    pass
             else:
                 logger.error(
                     "Failed to connect via makcu-py-lib. Check device power/connection."
@@ -57,7 +82,8 @@ class MakcuController:
             return
         try:
             self.makcu_lib.press(MouseButton.LEFT)
-        except MakcuConnectionError:
+        except (MakcuConnectionError, MakcuTimeoutError, SerialException, SerialTimeoutException) as e:
+            logger.warning(f"Makcu press_left error: {e}. Disabling controller until reconnect.")
             self.is_connected = False
 
     def release_left(self):
@@ -66,7 +92,8 @@ class MakcuController:
             return
         try:
             self.makcu_lib.release(MouseButton.LEFT)
-        except MakcuConnectionError:
+        except (MakcuConnectionError, MakcuTimeoutError, SerialException, SerialTimeoutException) as e:
+            logger.warning(f"Makcu release_left error: {e}. Disabling controller until reconnect.")
             self.is_connected = False
 
     def move(self, dx, dy):
@@ -75,5 +102,6 @@ class MakcuController:
             return
         try:
             self.makcu_lib.move(int(dx), int(dy))
-        except MakcuConnectionError:
+        except (MakcuConnectionError, MakcuTimeoutError, SerialException, SerialTimeoutException) as e:
+            logger.warning(f"Makcu move error: {e}. Disabling controller until reconnect.")
             self.is_connected = False

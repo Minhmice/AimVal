@@ -76,19 +76,32 @@ class Aimer:
             if distance < self.config.get("DEADZONE"):
                 return
 
+            # Apply ease out and smoothness
+            ease_out = bool(self.config.get("MOUSE_EASE_OUT", True))
+            smoothness = max(0.1, min(1.0, float(self.config.get("MOUSE_SMOOTHNESS", 0.8))))
+            
+            if ease_out:
+                # Ease out: slower as we get closer to target
+                ease_factor = min(1.0, distance / 50.0)  # Start easing when within 50px
+                speed *= ease_factor * smoothness
+            else:
+                speed *= smoothness
+
             dx = dx_raw * speed
             dy = dy_raw * speed * vertical_damping
 
             jitter_x = random.uniform(-jitter_strength, jitter_strength)
             jitter_y = random.uniform(-jitter_strength, jitter_strength)
 
-            move_x = (dx + jitter_x) / sensitivity
-            move_y = (dy + jitter_y) / sensitivity
+            speed_mult = max(float(self.config.get("MOUSE_SPEED_MULTIPLIER") or 1.0), 0.1)
+            move_x = ((dx + jitter_x) / sensitivity) * speed_mult
+            move_y = ((dy + jitter_y) / sensitivity) * speed_mult
 
             if abs(move_x) > 0.5 or abs(move_y) > 0.5:
                 self.mouse.move(move_x, move_y)
 
-            time.sleep(0.001)
+            step_delay_ms = max(1, int(self.config.get("MOUSE_STEP_DELAY_MS") or 1))
+            time.sleep(step_delay_ms / 1000.0)
 
         finally:
             self.is_aiming = False

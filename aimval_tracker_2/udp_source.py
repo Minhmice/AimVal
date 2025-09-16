@@ -32,11 +32,14 @@ class _FrameStore:
         self.rt_fps: float = 0.0
         self.avg_ms: float = 0.0
         self.avg_fps: float = 0.0
+        self.last_sender_ip: Optional[str] = None
 
-    def set(self, data: bytes) -> None:
+    def set(self, data: bytes, sender_ip: Optional[str] = None) -> None:
         with self._lock:
             self._buf = data
             self.frames_completed += 1
+            if sender_ip:
+                self.last_sender_ip = sender_ip
             now_ns = time.monotonic_ns()
             self.last_frame_ns = now_ns
             if self.first_frame_ns == 0:
@@ -72,18 +75,39 @@ class _Receiver(threading.Thread):
 
     def stop(self) -> None:
         self._stop.set()
+    
+    def _is_valid_jpeg(self, data: bytes) -> bool:
+        """Check if the data is a valid JPEG frame."""
+        try:
+            # Basic JPEG validation
+            if len(data) < 4:
+                return False
+            if not data.startswith(SOI) or not data.endswith(EOI):
+                return False
+            
+            # Try to decode with OpenCV to validate
+            import cv2
+            import numpy as np
+            nparr = np.frombuffer(data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return img is not None and img.size > 0
+        except Exception:
+            return False
 
     def run(self) -> None:
         while not self._stop.is_set():
             rlist, _, _ = select.select([self.sock], [], [], 0.002)
             while rlist and not self._stop.is_set():
                 try:
-                    data, _ = self.sock.recvfrom(65535)
-                    self._buffer.extend(data)
+                    data, addr = self.sock.recvfrom(65535)
+                    # Only add data if buffer is not too large
+                    if len(self._buffer) < self.max_buffer_bytes:
+                        self._buffer.extend(data)
                     with self.store._lock:
                         self.store.packets_received += 1
                         self.store.bytes_received += len(data)
                         self.store.last_packet_ns = time.monotonic_ns()
+                        self.store.last_sender_ip = addr[0]  # Store sender IP
                 except BlockingIOError:
                     break
                 rlist, _, _ = select.select([self.sock], [], [], 0.0)
@@ -100,8 +124,17 @@ class _Receiver(threading.Thread):
                     if len(self._buffer) > self.max_buffer_bytes:
                         self._buffer[:] = self._buffer[-(2 * 1024 * 1024) :]
                     break
-                latest = bytes(self._buffer[start : end + 2])
+                
+                # Extract JPEG frame
+                jpeg_data = bytes(self._buffer[start : end + 2])
                 del self._buffer[: end + 2]
+                
+                # Validate JPEG frame before storing
+                if self._is_valid_jpeg(jpeg_data):
+                    latest = jpeg_data
+                else:
+                    # Skip corrupted frame
+                    continue
 
             if latest is not None:
                 self.store.set(latest)
@@ -165,9 +198,19 @@ class UdpFrameSource:
                 return frame
             except Exception:
                 pass
-        arr = np.frombuffer(buf, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        return img
+        try:
+            arr = np.frombuffer(buf, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None or img.size == 0:
+                # Skip corrupted frame
+                return None
+            return img
+        except Exception as e:
+            # Log corruption errors less frequently
+            if not hasattr(self, '_last_corruption_log') or time.time() - self._last_corruption_log > 5.0:
+                print(f"UDP frame corruption: {e}")
+                self._last_corruption_log = time.time()
+            return None
 
     def stop(self) -> None:
         if self.receiver is not None:
@@ -193,4 +236,5 @@ class UdpFrameSource:
                 "rt_fps": float(self.store.rt_fps),
                 "avg_ms": float(self.store.avg_ms),
                 "avg_fps": float(self.store.avg_fps),
+                "last_sender_ip": self.store.last_sender_ip,
             }

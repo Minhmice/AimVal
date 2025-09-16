@@ -33,7 +33,7 @@ class SharedConfig:
             "FRAME_SOURCE",
             "FPS_LIMIT",
             "DEBUG_WINDOW_VISIBLE",
-            "VIEW_SCREEN_VISIBLE",
+            "HUD_SHOW_AIM_STATUS",
             "AIM_ASSIST_ENABLED",
             "TRIGGERBOT_ENABLED",
             "AIM_MODE",
@@ -46,12 +46,20 @@ class SharedConfig:
             "AIM_TRACKING_SPEED",
             "AIM_JITTER",
             "MOUSE_SENSITIVITY",
+            "MOUSE_SPEED_MULTIPLIER",
             "AIM_ASSIST_RANGE",
             "AIM_VERTICAL_DAMPING_FACTOR",
             "AIM_ASSIST_DELAY",
             "AIM_HEADSHOT_MODE",
             "HEADSHOT_OFFSET_PERCENT",
             "DEADZONE",
+            "MOUSE_1_BUTTON",
+            "MOUSE_2_BUTTON",
+            "MOUSE_1_MODE",
+            "MOUSE_2_MODE",
+            "MOUSE_STEP_DELAY_MS",
+            "MOUSE_EASE_OUT",
+            "MOUSE_SMOOTHNESS",
             "MIN_CONTOUR_AREA",
             "DILATE_ITERATIONS",
             "DILATE_KERNEL_WIDTH",
@@ -112,7 +120,7 @@ class SharedConfig:
             "ACTIVE_COLOR_PROFILE": "purple-new",
             "FRAME_SOURCE": "udp",
             "FPS_LIMIT": 240,
-            "VIEW_SCREEN_VISIBLE": False,
+            "HUD_SHOW_AIM_STATUS": True,
             "LOWER_YELLOW_H": default_profile["lower"][0],
             "LOWER_YELLOW_S": default_profile["lower"][1],
             "LOWER_YELLOW_V": default_profile["lower"][2],
@@ -121,8 +129,17 @@ class SharedConfig:
             "UPPER_YELLOW_V": default_profile["upper"][2],
             "is_running": False,
             "AIM_ASSIST_ENABLED": True,
-            "TRIGGERBOT_ENABLED": True,
+            "TRIGGERBOT_ENABLED": False,
             "DEBUG_WINDOW_VISIBLE": True,
+            "MOUSE_ACTIVATION_BUTTON_1": "Right",  # Left/Right/Middle/Mouse4/Mouse5
+            "MOUSE_ACTIVATION_BUTTON_2": "Mouse4",  # Left/Right/Middle/Mouse4/Mouse5
+            "MOUSE_ACTIVATION_MODE_1": "Hold",     # Hold/Toggle for button 1
+            "MOUSE_ACTIVATION_MODE_2": "Toggle",   # Hold/Toggle for button 2
+            "MOUSE_ACTIVATION_DELAY_MS": 0,
+            "MOUSE_SPEED_MULTIPLIER": 1.0,
+            "MOUSE_STEP_DELAY_MS": 1,
+            "MOUSE_EASE_OUT": True,
+            "MOUSE_SMOOTHNESS": 0.8,
             "AIM_MODE": "Hybrid",
             "WINDMOUSE_G": 7.0,
             "WINDMOUSE_W": 3.0,
@@ -139,6 +156,10 @@ class SharedConfig:
             "AIM_HEADSHOT_MODE": True,
             "HEADSHOT_OFFSET_PERCENT": 18,
             "DEADZONE": 2,
+        "MOUSE_1_BUTTON": "right",
+        "MOUSE_2_BUTTON": "left",
+            "MOUSE_1_MODE": "toggle",
+            "MOUSE_2_MODE": "hold",
             "MIN_CONTOUR_AREA": 40,
             "DILATE_ITERATIONS": 2,
             "DILATE_KERNEL_WIDTH": 3,
@@ -163,10 +184,10 @@ class SharedConfig:
         self.settings.update(self.hardcoded_settings)
         self.load_from(self.default_filename, is_default=True)
 
-    def get(self, key):
+    def get(self, key, default=None):
         """Thread-safe getter for any key in the settings dictionary."""
         with self.lock:
-            return self.settings.get(key)
+            return self.settings.get(key, default)
 
     def set(self, key, value):
         """Thread-safe setter that ignores attempts to override hardcoded keys."""
