@@ -8,11 +8,14 @@ from screeninfo import get_monitors
 import ctypes
 from collections import deque
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SharedConfig
-from hardware import MakcuController
-from detection import Detector, visualize_detection, verify_on_target, draw_range_circle
-from aiming import Aimer
-from udp_source import UdpFrameSource
+from .hardware import MakcuController
+from .detection import Detector, visualize_detection, verify_on_target, draw_range_circle
+from .aiming import Aimer
+from .udp_source import UdpFrameSource
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +344,90 @@ class TriggerbotCore:
         time.sleep(duration)
         self.mouse_controller.release_left()
 
+    def _handle_triggerbot(self, is_on_target):
+        """Optimized trigger bot handler with advanced features."""
+        if not self.config.get("TRIGGERBOT_ENABLED"):
+            self.trigger_activated_at = 0
+            return
+        
+        current_time = time.time()
+        
+        # Advanced trigger modes
+        trigger_mode = self.config.get("TRIGGER_MODE", "instant")
+        burst_mode = self.config.get("TRIGGER_BURST_MODE", False)
+        adaptive_delay = self.config.get("TRIGGER_ADAPTIVE_DELAY", False)
+        
+        if is_on_target:
+            if self.trigger_activated_at == 0:
+                self.trigger_activated_at = current_time
+                logger.debug("Trigger activated - on target detected")
+            
+            # Calculate delay based on mode
+            if adaptive_delay:
+                # Adaptive delay based on target size and distance
+                delay_ms = self._calculate_adaptive_delay()
+            else:
+                delay_ms = self.config.get("TRIGGERBOT_DELAY_MS")
+            
+            # Check if delay has passed
+            if (current_time - self.trigger_activated_at) * 1000 >= delay_ms:
+                # Check cooldown
+                shot_duration = self.config.get("SHOT_DURATION")
+                shot_cooldown = self.config.get("SHOT_COOLDOWN")
+                min_cooldown = self.config.get("TRIGGER_MIN_COOLDOWN", shot_cooldown)
+                
+                if (current_time - self.last_shot_time) > (shot_duration + min_cooldown):
+                    if trigger_mode == "instant":
+                        self._fire_trigger_shot()
+                    elif trigger_mode == "burst":
+                        self._fire_trigger_burst()
+                    elif trigger_mode == "adaptive":
+                        self._fire_adaptive_shot()
+                    
+                    self.last_shot_time = current_time
+        else:
+            if self.trigger_activated_at != 0:
+                logger.debug("Trigger deactivated - off target")
+            self.trigger_activated_at = 0
+
+    def _calculate_adaptive_delay(self):
+        """Calculate adaptive delay based on target characteristics."""
+        base_delay = self.config.get("TRIGGERBOT_DELAY_MS")
+        target_size_factor = self.config.get("TRIGGER_SIZE_FACTOR", 1.0)
+        distance_factor = self.config.get("TRIGGER_DISTANCE_FACTOR", 1.0)
+        
+        # Simple adaptive calculation (can be enhanced)
+        adaptive_delay = base_delay * target_size_factor * distance_factor
+        return max(0, min(adaptive_delay, self.config.get("TRIGGER_MAX_DELAY_MS", 100)))
+
+    def _fire_trigger_shot(self):
+        """Fire a single trigger shot."""
+        shot_duration = self.config.get("SHOT_DURATION")
+        logger.info("TRIGGER BOT: Firing shot!")
+        self.shoot_burst(shot_duration)
+
+    def _fire_trigger_burst(self):
+        """Fire a burst of shots."""
+        burst_count = self.config.get("TRIGGER_BURST_COUNT", 3)
+        burst_delay = self.config.get("TRIGGER_BURST_DELAY", 0.05)
+        shot_duration = self.config.get("SHOT_DURATION")
+        
+        logger.info(f"TRIGGER BOT: Firing burst of {burst_count} shots!")
+        
+        def burst_sequence():
+            for i in range(burst_count):
+                self.shoot_burst(shot_duration)
+                if i < burst_count - 1:  # Don't delay after last shot
+                    time.sleep(burst_delay)
+        
+        # Run burst in separate thread to avoid blocking
+        threading.Thread(target=burst_sequence, daemon=True).start()
+
+    def _fire_adaptive_shot(self):
+        """Fire adaptive shot based on target characteristics."""
+        # This can be enhanced with more sophisticated logic
+        self._fire_trigger_shot()
+
     def run_one_frame(self):
         """Process a single frame: capture -> detect -> trigger -> aim -> debug.
 
@@ -413,32 +500,8 @@ class TriggerbotCore:
             # Check mouse button toggles
             self._check_mouse_toggles()
 
-            # Triggerbot: only when enabled
-            trigger_enabled = self.config.get("TRIGGERBOT_ENABLED")
-            if trigger_enabled:
-                logger.debug("Trigger bot is ENABLED - checking for targets")
-                if is_on_target:
-                    if self.trigger_activated_at == 0:
-                        self.trigger_activated_at = time.time()
-                        logger.debug("Trigger activated - on target detected")
-
-                    delay_ms = self.config.get("TRIGGERBOT_DELAY_MS")
-                    if (time.time() - self.trigger_activated_at) * 1000 >= delay_ms:
-                        shot_d = self.config.get("SHOT_DURATION")
-                        shot_c = self.config.get("SHOT_COOLDOWN")
-                        if (time.time() - self.last_shot_time) > (shot_d + shot_c):
-                            logger.info("TRIGGER BOT: Firing shot!")
-                            self.shoot_burst(shot_d)
-                            self.last_shot_time = time.time()
-                else:
-                    if self.trigger_activated_at != 0:
-                        logger.debug("Trigger deactivated - off target")
-                    self.trigger_activated_at = 0
-            else:
-                # Reset trigger when not enabled
-                if self.trigger_activated_at != 0:
-                    logger.debug("Trigger reset - triggerbot disabled")
-                self.trigger_activated_at = 0
+            # Triggerbot: simplified and optimized
+            self._handle_triggerbot(is_on_target)
 
             # Aim assist: only when enabled
             if self.is_aim_active:

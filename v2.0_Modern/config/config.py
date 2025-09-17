@@ -133,8 +133,8 @@ class SharedConfig:
             "DEBUG_WINDOW_VISIBLE": True,
             "MOUSE_ACTIVATION_BUTTON_1": "Right",  # Left/Right/Middle/Mouse4/Mouse5
             "MOUSE_ACTIVATION_BUTTON_2": "Mouse4",  # Left/Right/Middle/Mouse4/Mouse5
-            "MOUSE_ACTIVATION_MODE_1": "Hold",     # Hold/Toggle for button 1
-            "MOUSE_ACTIVATION_MODE_2": "Toggle",   # Hold/Toggle for button 2
+            "MOUSE_ACTIVATION_MODE_1": "Hold",  # Hold/Toggle for button 1
+            "MOUSE_ACTIVATION_MODE_2": "Toggle",  # Hold/Toggle for button 2
             "MOUSE_ACTIVATION_DELAY_MS": 0,
             "MOUSE_SPEED_MULTIPLIER": 1.0,
             "MOUSE_STEP_DELAY_MS": 1,
@@ -156,22 +156,78 @@ class SharedConfig:
             "AIM_HEADSHOT_MODE": True,
             "HEADSHOT_OFFSET_PERCENT": 18,
             "DEADZONE": 2,
-        "MOUSE_1_BUTTON": "right",
-        "MOUSE_2_BUTTON": "left",
+            "MOUSE_1_BUTTON": "right",
+            "MOUSE_2_BUTTON": "left",
             "MOUSE_1_MODE": "toggle",
             "MOUSE_2_MODE": "hold",
             "MIN_CONTOUR_AREA": 40,
-            "DILATE_ITERATIONS": 2,
-            "DILATE_KERNEL_WIDTH": 3,
-            "DILATE_KERNEL_HEIGHT": 3,
-            "ERODE_ITERATIONS": 1,
-            "ERODE_KERNEL_WIDTH": 2,
-            "ERODE_KERNEL_HEIGHT": 2,
+            "DILATE_ITERATIONS": 2.0,
+            "DILATE_KERNEL_WIDTH": 3.0,
+            "DILATE_KERNEL_HEIGHT": 3.0,
+            "ERODE_ITERATIONS": 1.0,
+            "ERODE_KERNEL_WIDTH": 2.0,
+            "ERODE_KERNEL_HEIGHT": 2.0,
             "SANDWICH_CHECK_HEIGHT": 15,
             "SANDWICH_CHECK_SCAN_WIDTH": 5,
             "SHOT_DURATION": 0.1,
             "SHOT_COOLDOWN": 0.15,
             "TRIGGERBOT_DELAY_MS": 10,
+            # Advanced Trigger Bot Settings
+            "TRIGGER_MODE": "instant",  # instant, burst, adaptive
+            "TRIGGER_BURST_MODE": False,
+            "TRIGGER_BURST_COUNT": 3,
+            "TRIGGER_BURST_DELAY": 0.05,
+            "TRIGGER_ADAPTIVE_DELAY": False,
+            "TRIGGER_SIZE_FACTOR": 1.0,
+            "TRIGGER_DISTANCE_FACTOR": 1.0,
+            "TRIGGER_MAX_DELAY_MS": 100,
+            "TRIGGER_MIN_COOLDOWN": 0.15,
+            "TRIGGER_RANDOM_DELAY": False,
+            "TRIGGER_RANDOM_MIN": 5,
+            "TRIGGER_RANDOM_MAX": 15,
+            "TRIGGER_SMOOTHING": True,
+            "TRIGGER_SMOOTHING_FACTOR": 0.8,
+            "TRIGGER_PREDICTION": False,
+            "TRIGGER_PREDICTION_TIME": 0.1,
+            "TRIGGER_ANTI_PATTERN": False,
+            "TRIGGER_ANTI_PATTERN_TIME": 0.5,
+            "TRIGGER_WEAPON_MODE": "auto",  # auto, single, burst, spray
+            "TRIGGER_WEAPON_DELAYS": {
+                "auto": 0.05,
+                "single": 0.1,
+                "burst": 0.08,
+                "spray": 0.03,
+            },
+            "TRIGGER_WEAPON_COOLDOWNS": {
+                "auto": 0.1,
+                "single": 0.2,
+                "burst": 0.15,
+                "spray": 0.05,
+            },
+            "TRIGGER_ACCURACY_MODE": "normal",  # normal, high, low
+            "TRIGGER_ACCURACY_FACTORS": {"normal": 1.0, "high": 0.8, "low": 1.2},
+            "TRIGGER_TARGET_PRIORITY": "center",  # center, closest, largest
+            "TRIGGER_TARGET_FILTER": True,
+            "TRIGGER_MIN_TARGET_SIZE": 5,
+            "TRIGGER_MAX_TARGET_SIZE": 100,
+            "TRIGGER_TARGET_CONFIDENCE": 0.7,
+            "TRIGGER_MOVEMENT_COMPENSATION": False,
+            "TRIGGER_MOVEMENT_THRESHOLD": 10,
+            "TRIGGER_MOVEMENT_FACTOR": 0.5,
+            "TRIGGER_HEALTH_CHECK": False,
+            "TRIGGER_HEALTH_THRESHOLD": 0.3,
+            "TRIGGER_AMMO_CHECK": False,
+            "TRIGGER_AMMO_THRESHOLD": 5,
+            "TRIGGER_SOUND_DETECTION": False,
+            "TRIGGER_SOUND_THRESHOLD": 0.5,
+            "TRIGGER_VIBRATION_FEEDBACK": False,
+            "TRIGGER_VIBRATION_INTENSITY": 0.5,
+            "TRIGGER_DEBUG_MODE": False,
+            "TRIGGER_DEBUG_LEVEL": 1,  # 1=basic, 2=detailed, 3=verbose
+            "TRIGGER_STATISTICS": True,
+            "TRIGGER_STATS_WINDOW": 100,  # frames
+            "TRIGGER_PERFORMANCE_MODE": False,
+            "TRIGGER_PERFORMANCE_THRESHOLD": 0.8,
             "FOV_RESOLUTION": "256x256",
             "UDP_HOST": "0.0.0.0",
             "UDP_PORT": 8080,
@@ -223,8 +279,8 @@ class SharedConfig:
         with self.lock:
             return np.ones(
                 (
-                    self.settings["DILATE_KERNEL_HEIGHT"],
-                    self.settings["DILATE_KERNEL_WIDTH"],
+                    int(self.settings["DILATE_KERNEL_HEIGHT"]),
+                    int(self.settings["DILATE_KERNEL_WIDTH"]),
                 ),
                 np.uint8,
             )
@@ -234,8 +290,8 @@ class SharedConfig:
         with self.lock:
             return np.ones(
                 (
-                    self.settings["ERODE_KERNEL_HEIGHT"],
-                    self.settings["ERODE_KERNEL_WIDTH"],
+                    int(self.settings["ERODE_KERNEL_HEIGHT"]),
+                    int(self.settings["ERODE_KERNEL_WIDTH"]),
                 ),
                 np.uint8,
             )

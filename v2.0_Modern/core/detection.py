@@ -28,11 +28,11 @@ class Detector:
 
         # Morphological closing: expand bright areas then slightly shrink them
         dilate_kernel = self.config.get_dilate_kernel()
-        dilate_iter = self.config.get("DILATE_ITERATIONS")
+        dilate_iter = int(self.config.get("DILATE_ITERATIONS"))
         dilated_mask = cv2.dilate(color_mask, dilate_kernel, iterations=dilate_iter)
 
         erode_kernel = self.config.get_erode_kernel()
-        erode_iter = self.config.get("ERODE_ITERATIONS")
+        erode_iter = int(self.config.get("ERODE_ITERATIONS"))
         processed_mask = cv2.erode(dilated_mask, erode_kernel, iterations=erode_iter)
 
         # Only consider external contours to avoid nested detections
