@@ -49,6 +49,10 @@ class TriggerbotCore:
         self.wnd_mask = "Debug: Mask"
         self.wnd_vision = "Debug: Vision"
 
+        # Latest debug frames for embedding in GUI (BGR numpy arrays)
+        self.latest_mask_bgr = None
+        self.latest_vision_bgr = None
+
         self.aim_target_first_seen_time = 0
         # Track optional raw viewer window lifecycle
 
@@ -455,17 +459,8 @@ class TriggerbotCore:
                 else:
                     cur_w, cur_h = 640, 480
 
-            if show_debug and not self.debug_windows_active:
-                cv2.namedWindow(self.wnd_mask, cv2.WINDOW_NORMAL)
-                cv2.moveWindow(self.wnd_mask, 0, 0)
-                cv2.namedWindow(self.wnd_vision, cv2.WINDOW_NORMAL)
-                cv2.moveWindow(self.wnd_vision, cur_w, 0)
-                cv2.setWindowProperty(self.wnd_mask, cv2.WND_PROP_TOPMOST, 1)
-                cv2.setWindowProperty(self.wnd_vision, cv2.WND_PROP_TOPMOST, 1)
-                self.debug_windows_active = True
-            elif not show_debug and self.debug_windows_active:
-                cv2.destroyAllWindows()
-                self.debug_windows_active = False
+            # OpenCV windows are disabled; we stream frames to the GUI instead
+            self.debug_windows_active = show_debug
 
             # If no valid frame, render placeholders and skip
             if frame is None or not hasattr(frame, "shape") or frame.size == 0:
@@ -480,9 +475,8 @@ class TriggerbotCore:
                         (0, 0, 255),
                         1,
                     )
-                    cv2.imshow(self.wnd_mask, black_screen)
-                    cv2.imshow(self.wnd_vision, black_screen)
-                    cv2.waitKey(1)
+                    self.latest_mask_bgr = black_screen
+                    self.latest_vision_bgr = black_screen
                 return
 
             potential_targets, processed_mask = self.detector.run(frame)
@@ -567,10 +561,9 @@ class TriggerbotCore:
                 except Exception:
                     pass
 
-                cv2.imshow(self.wnd_mask, mask_display)
-                cv2.imshow(self.wnd_vision, vision_display)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    self.config.set("is_running", False)
+                # Publish frames for GUI embedding
+                self.latest_mask_bgr = mask_display
+                self.latest_vision_bgr = vision_display
 
         except Exception as e:
             logger.exception("An unhandled exception occurred during a frame run")

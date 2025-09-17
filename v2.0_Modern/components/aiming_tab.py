@@ -16,7 +16,7 @@ class AimingTabComponent:
         # Mode selection
         self._create_mode_section(parent)
         
-        # Dynamic frame container for mode-specific settings
+        # Dynamic frame container for mode-specific settings (single column)
         self.dynamic_frame_container = ttk.Frame(parent)
         self.dynamic_frame_container.pack(fill=X, pady=0, padx=0)
         

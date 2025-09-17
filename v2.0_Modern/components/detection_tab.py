@@ -13,23 +13,15 @@ class DetectionTabComponent:
         self.widget_vars = widget_vars
         self.callbacks = callbacks
         
-        # Create main container with responsive layout
+        # Create single-column container (all config stacks vertically)
         main_container = ttk.Frame(parent)
         main_container.pack(fill=BOTH, expand=YES, padx=5, pady=5)
         
-        # Left column for basic settings
-        left_column = ttk.Frame(main_container)
-        left_column.pack(side=LEFT, fill=BOTH, expand=YES, padx=(0, 5))
-        
-        # Right column for advanced settings  
-        right_column = ttk.Frame(main_container)
-        right_column.pack(side=RIGHT, fill=BOTH, expand=YES, padx=(5, 0))
-        
-        # Create sections
-        self._create_basic_detection_section(left_column)
-        self._create_noise_processing_section(left_column)
-        self._create_verification_section(right_column)
-        self._create_color_profile_section(right_column)
+        # Create sections in one column
+        self._create_basic_detection_section(main_container)
+        self._create_noise_processing_section(main_container)
+        self._create_verification_section(main_container)
+        self._create_color_profile_section(main_container)
     
     def _create_basic_detection_section(self, parent):
         """Create basic detection section."""
