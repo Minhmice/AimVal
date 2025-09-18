@@ -1,0 +1,19 @@
+# Core
+numpy>=1.24
+opencv-python>=4.8
+Pillow>=10.0
+
+# UI (added later)
+customtkinter>=5.2
+
+# Hardware I/O
+pyserial>=3.5
+
+# AI backend (enabled by default)
+onnxruntime>=1.18
+
+# Optional fast JPEG decode for MJPEG (fallback to cv2 if missing)
+# turbojpeg>=0.5.0
+
+# Optional Parquet logging (disabled by default)
+# pyarrow>=15.0
