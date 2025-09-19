@@ -13,7 +13,7 @@ from udp_source import UdpFrameSource
 
 from config import config
 from mouse import Mouse, is_button_pressed
-from detection2 import load_model, perform_detection
+from detection2 import load_model, perform_detection, reload_model
 
 
 BUTTONS = {
@@ -51,7 +51,7 @@ class AimTracker:
         self.in_game_sens = float(getattr(config, "in_game_sens", 7))
         self.color = getattr(config, "color", "yellow")
         self.mode = getattr(config, "mode", "Normal")
-        self.selected_mouse_button = (getattr(config, "selected_mouse_button", 3),)
+        self.selected_mouse_button = getattr(config, "selected_mouse_button", 3)
         self.selected_tb_btn = getattr(config, "selected_tb_btn", 3)
         self.max_speed = float(getattr(config, "max_speed", 1000.0))
 
@@ -435,7 +435,9 @@ class ViewerApp(ctk.CTk):
         self.geometry("400x700")
 
         # Dicos pour MAJ UI <-> config
-        self._slider_widgets = {}  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
+        self._slider_widgets = (
+            {}
+        )  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
         self._checkbox_vars = {}  # key -> tk.BooleanVar
         self._option_widgets = {}  # key -> CTkOptionMenu
 
@@ -444,9 +446,7 @@ class ViewerApp(ctk.CTk):
         self.connected = False
         # enlève la barre native
 
-        # Detection tab
-        self.tab_detection = self.tabview.add("🧪 Detection")
-        self._build_detection_tab()
+        # Detection tab moved after TabView creation
 
         # barre custom
         self.title_bar = ctk.CTkFrame(self, height=30, corner_radius=0)
@@ -474,11 +474,13 @@ class ViewerApp(ctk.CTk):
         self.tab_general = self.tabview.add("⚙️ Général")
         self.tab_aimbot = self.tabview.add("🎯 Aimbot")
         self.tab_tb = self.tabview.add("🔫 Triggerbot")
+        self.tab_detection = self.tabview.add("🧪 Detection")
         self.tab_config = self.tabview.add("💾 Config")
 
         self._build_general_tab()
         self._build_aimbot_tab()
         self._build_tb_tab()
+        self._build_detection_tab()
         self._build_config_tab()
 
         # Status polling
@@ -486,6 +488,76 @@ class ViewerApp(ctk.CTk):
         self._load_initial_config()
 
     # ---------- Helpers de mapping UI ----------
+    def _create_detection_scrollable_frame(self, parent):
+        """Create a smooth scrollable frame specifically for Detection tab."""
+        # Main container
+        main_container = ctk.CTkFrame(parent, corner_radius=0)
+        main_container.pack(fill="both", expand=True, padx=0, pady=0)
+        
+        # Canvas for scrolling
+        canvas = tk.Canvas(
+            main_container,
+            highlightthickness=0,
+            relief="flat",
+            bd=0,
+            bg="#212121" if ctk.get_appearance_mode() == "Dark" else "#EBEBEB"
+        )
+        
+        # Scrollbar
+        scrollbar = ctk.CTkScrollbar(
+            main_container,
+            orientation="vertical",
+            command=canvas.yview
+        )
+        
+        # Scrollable content frame
+        scrollable_frame = ctk.CTkFrame(canvas, corner_radius=0)
+        
+        # Configure scrolling
+        def update_scroll_region(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        scrollable_frame.bind("<Configure>", update_scroll_region)
+        
+        # Create canvas window
+        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        
+        # Configure canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack elements
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Smooth scrolling function
+        def smooth_scroll(event):
+            # Smoother, more responsive scrolling
+            if event.delta:
+                delta = -int(event.delta / 40)  # Adjust for smoothness
+            else:
+                delta = -1 if event.num == 4 else 1
+            canvas.yview_scroll(delta, "units")
+        
+        # Bind scroll events
+        def bind_scroll_events(widget):
+            widget.bind("<MouseWheel>", smooth_scroll)
+            widget.bind("<Button-4>", smooth_scroll)
+            widget.bind("<Button-5>", smooth_scroll)
+        
+        # Apply scroll binding to relevant widgets
+        bind_scroll_events(canvas)
+        bind_scroll_events(scrollable_frame)
+        bind_scroll_events(main_container)
+        
+        # Auto-resize canvas content width
+        def configure_canvas_width(event):
+            canvas_width = event.width
+            canvas.itemconfig(canvas_frame, width=canvas_width)
+        
+        canvas.bind("<Configure>", configure_canvas_width)
+        
+        return scrollable_frame
+
     def _register_slider(self, key, slider, label, vmin, vmax, is_float):
         self._slider_widgets[key] = {
             "slider": slider,
@@ -498,7 +570,7 @@ class ViewerApp(ctk.CTk):
     def _load_initial_config(self):
         try:
             import json, os
-            from detection import reload_model
+            from detection2 import reload_model
 
             if os.path.exists("configs/default.json"):
                 with open("configs/default.json", "r") as f:
@@ -580,206 +652,208 @@ class ViewerApp(ctk.CTk):
         self._refresh_config_list()
 
     # -------------- Tab Detection --------------
+    def _build_detection_tab(self):
+        # Create smooth scrollable frame specifically for detection parameters
+        scrollable_detection = self._create_detection_scrollable_frame(self.tab_detection)
 
+        def add_slider_row(key, text, vmin, vmax, init, is_float):
+            s, l = self._add_slider_with_label(
+                scrollable_detection,  # Use scrollable frame instead of tab_detection
+                text,
+                vmin,
+                vmax,
+                init,
+                lambda val, k=key, f=is_float: self._on_detection_slider_changed(
+                    k, val, f
+                ),
+                is_float=is_float,
+            )
+            self._register_slider(key, s, l, vmin, vmax, is_float)
 
-def _build_detection_tab(self):
-    # Helper để tránh lặp
-    def add_slider_row(key, text, vmin, vmax, init, is_float=True, step=None):
-        s, l = self._add_slider_with_label(
-            self.tab_detection,
-            text,
-            vmin,
-            vmax,
-            init,
-            lambda val: self._on_detection_slider_changed(key, val, is_float),
-            is_float=is_float,
+        # HSV ranges
+        add_slider_row(
+            "det_h_min",
+            "Hue Min",
+            0,
+            179,
+            float(getattr(config, "det_h_min", 30)),
+            False,
         )
-        # number_of_steps đã set trong _add_slider_with_label theo is_float
-        self._register_slider(key, s, l, vmin, vmax, is_float)
+        add_slider_row(
+            "det_h_max",
+            "Hue Max",
+            0,
+            179,
+            float(getattr(config, "det_h_max", 160)),
+            False,
+        )
+        add_slider_row(
+            "det_s_min",
+            "Sat Min",
+            0,
+            255,
+            float(getattr(config, "det_s_min", 125)),
+            False,
+        )
+        add_slider_row(
+            "det_s_max",
+            "Sat Max",
+            0,
+            255,
+            float(getattr(config, "det_s_max", 255)),
+            False,
+        )
+        add_slider_row(
+            "det_v_min",
+            "Val Min",
+            0,
+            255,
+            float(getattr(config, "det_v_min", 150)),
+            False,
+        )
+        add_slider_row(
+            "det_v_max",
+            "Val Max",
+            0,
+            255,
+            float(getattr(config, "det_v_max", 255)),
+            False,
+        )
 
-    # HSV ranges
-    add_slider_row(
-        "det_h_min",
-        "Hue Min",
-        0,
-        179,
-        float(getattr(config, "det_h_min", 30)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_h_max",
-        "Hue Max",
-        0,
-        179,
-        float(getattr(config, "det_h_max", 160)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_s_min",
-        "Sat Min",
-        0,
-        255,
-        float(getattr(config, "det_s_min", 125)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_s_max",
-        "Sat Max",
-        0,
-        255,
-        float(getattr(config, "det_s_max", 255)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_v_min",
-        "Val Min",
-        0,
-        255,
-        float(getattr(config, "det_v_min", 150)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_v_max",
-        "Val Max",
-        0,
-        255,
-        float(getattr(config, "det_v_max", 255)),
-        is_float=False,
-    )
+        # Morphology
+        add_slider_row(
+            "det_close_kw",
+            "Morph Close Kernel W",
+            1,
+            65,
+            float(getattr(config, "det_close_kw", 15)),
+            False,
+        )
+        add_slider_row(
+            "det_close_kh",
+            "Morph Close Kernel H",
+            1,
+            65,
+            float(getattr(config, "det_close_kh", 30)),
+            False,
+        )
+        add_slider_row(
+            "det_dilate_k",
+            "Dilation Kernel Size",
+            1,
+            65,
+            float(getattr(config, "det_dilate_k", 15)),
+            False,
+        )
+        add_slider_row(
+            "det_dilate_iter",
+            "Dilation Iterations",
+            0,
+            5,
+            float(getattr(config, "det_dilate_iter", 1)),
+            False,
+        )
 
-    # Morphology
-    add_slider_row(
-        "det_close_kw",
-        "Morph Close Kernel W",
-        1,
-        65,
-        float(getattr(config, "det_close_kw", 15)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_close_kh",
-        "Morph Close Kernel H",
-        1,
-        65,
-        float(getattr(config, "det_close_kh", 30)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_dilate_k",
-        "Dilation Kernel Size",
-        1,
-        65,
-        float(getattr(config, "det_dilate_k", 15)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_dilate_iter",
-        "Dilation Iterations",
-        0,
-        5,
-        float(getattr(config, "det_dilate_iter", 1)),
-        is_float=False,
-    )
+        # Contour filters
+        add_slider_row(
+            "det_min_area",
+            "Min Area (px^2)",
+            0,
+            300000,
+            float(getattr(config, "det_min_area", 80)),
+            False,
+        )
+        add_slider_row(
+            "det_max_area",
+            "Max Area (px^2)",
+            1000,
+            1000000,
+            float(getattr(config, "det_max_area", 200000)),
+            False,
+        )
+        add_slider_row(
+            "det_ar_min",
+            "Aspect Ratio Min",
+            0.05,
+            3.0,
+            float(getattr(config, "det_ar_min", 0.2)),
+            True,
+        )
+        add_slider_row(
+            "det_ar_max",
+            "Aspect Ratio Max",
+            0.2,
+            10.0,
+            float(getattr(config, "det_ar_max", 5.0)),
+            True,
+        )
 
-    # Contour filters
-    add_slider_row(
-        "det_min_area",
-        "Min Area (px^2)",
-        0,
-        300000,
-        float(getattr(config, "det_min_area", 80)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_max_area",
-        "Max Area (px^2)",
-        1000,
-        1000000,
-        float(getattr(config, "det_max_area", 200000)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_ar_min",
-        "Aspect Ratio Min",
-        0.05,
-        3.0,
-        float(getattr(config, "det_ar_min", 0.2)),
-        is_float=True,
-    )
-    add_slider_row(
-        "det_ar_max",
-        "Aspect Ratio Max",
-        0.2,
-        10.0,
-        float(getattr(config, "det_ar_max", 5.0)),
-        is_float=True,
-    )
+        # Merge / Confidence / Vertical line
+        add_slider_row(
+            "det_merge_dist",
+            "Merge Distance",
+            10,
+            600,
+            float(getattr(config, "det_merge_dist", 250)),
+            False,
+        )
+        add_slider_row(
+            "det_iou_thr",
+            "Merge IoU Threshold",
+            0.0,
+            1.0,
+            float(getattr(config, "det_iou_thr", 0.1)),
+            True,
+        )
+        add_slider_row(
+            "det_conf_thr",
+            "Confidence Threshold (0-1)",
+            0.0,
+            1.0,
+            float(getattr(config, "det_conf_thr", 0.02)),
+            True,
+        )
+        add_slider_row(
+            "det_vline_min_h",
+            "Vertical Line Min Height (px)",
+            0,
+            200,
+            float(getattr(config, "det_vline_min_h", 5)),
+            False,
+        )
 
-    # Merge / Confidence / Vertical line
-    add_slider_row(
-        "det_merge_dist",
-        "Merge Distance",
-        10,
-        600,
-        float(getattr(config, "det_merge_dist", 250)),
-        is_float=False,
-    )
-    add_slider_row(
-        "det_iou_thr",
-        "Merge IoU Threshold",
-        0.0,
-        1.0,
-        float(getattr(config, "det_iou_thr", 0.1)),
-        is_float=True,
-    )
-    add_slider_row(
-        "det_conf_thr",
-        "Confidence Threshold (0-1)",
-        0.0,
-        1.0,
-        float(getattr(config, "det_conf_thr", 0.02)),
-        is_float=True,
-    )
-    add_slider_row(
-        "det_vline_min_h",
-        "Vertical Line Min Height (px)",
-        0,
-        200,
-        float(getattr(config, "det_vline_min_h", 5)),
-        is_float=False,
-    )
+        # CLAHE
+        add_slider_row(
+            "det_clahe_clip",
+            "CLAHE Clip Limit",
+            1.0,
+            6.0,
+            float(getattr(config, "det_clahe_clip", 2.0)),
+            True,
+        )
+        add_slider_row(
+            "det_clahe_grid",
+            "CLAHE Grid Size",
+            4,
+            32,
+            float(getattr(config, "det_clahe_grid", 8)),
+            False,
+        )
 
-    # CLAHE
-    add_slider_row(
-        "det_clahe_clip",
-        "CLAHE Clip Limit",
-        1.0,
-        6.0,
-        float(getattr(config, "det_clahe_clip", 2.0)),
-        is_float=True,
-    )
-    add_slider_row(
-        "det_clahe_grid",
-        "CLAHE Grid Size",
-        4,
-        32,
-        float(getattr(config, "det_clahe_grid", 8)),
-        is_float=False,
-    )
+        # Checkbox Enable CLAHE
+        self.var_enable_clahe = tk.BooleanVar(
+            value=bool(getattr(config, "use_clahe", True))
+        )
+        cb = ctk.CTkCheckBox(
+            scrollable_detection,  # Use scrollable frame
+            text="Enable CLAHE",
+            variable=self.var_enable_clahe,
+            command=self._on_enable_clahe_changed,
+        )
+        cb.pack(pady=6, anchor="w")
+        self._checkbox_vars["use_clahe"] = self.var_enable_clahe
 
-    # Gợi ý: thêm checkbox Enable CLAHE nếu muốn
-    self.var_enable_clahe = tk.BooleanVar(
-        value=bool(getattr(config, "use_clahe", True))
-    )
-    cb = ctk.CTkCheckBox(
-        self.tab_detection,
-        text="Enable CLAHE",
-        variable=self.var_enable_clahe,
-        command=self._on_enable_clahe_changed,
-    )
-    cb.pack(pady=6, anchor="w")
-    self._checkbox_vars["use_clahe"] = self.var_enable_clahe
-
+    # draggable title bar handlers
     def start_move(self, event):
         self._x = event.x
         self._y = event.y
@@ -791,6 +865,7 @@ def _build_detection_tab(self):
 
     def _get_current_settings(self):
         return {
+            # Aimbot/General
             "normal_x_speed": getattr(config, "normal_x_speed", 0.5),
             "normal_y_speed": getattr(config, "normal_y_speed", 0.5),
             "normalsmooth": getattr(config, "normalsmooth", 10),
@@ -806,6 +881,32 @@ def _build_detection_tab(self):
             "enabletb": getattr(config, "enabletb", False),
             "selected_mouse_button": getattr(config, "selected_mouse_button", 3),
             "selected_tb_btn": getattr(config, "selected_tb_btn", 3),
+            # Detection HSV
+            "det_h_min": getattr(config, "det_h_min", 30),
+            "det_h_max": getattr(config, "det_h_max", 160),
+            "det_s_min": getattr(config, "det_s_min", 125),
+            "det_s_max": getattr(config, "det_s_max", 255),
+            "det_v_min": getattr(config, "det_v_min", 150),
+            "det_v_max": getattr(config, "det_v_max", 255),
+            # Morphology
+            "det_close_kw": getattr(config, "det_close_kw", 15),
+            "det_close_kh": getattr(config, "det_close_kh", 30),
+            "det_dilate_k": getattr(config, "det_dilate_k", 15),
+            "det_dilate_iter": getattr(config, "det_dilate_iter", 1),
+            # Contour filters
+            "det_min_area": getattr(config, "det_min_area", 80),
+            "det_max_area": getattr(config, "det_max_area", 200000),
+            "det_ar_min": getattr(config, "det_ar_min", 0.2),
+            "det_ar_max": getattr(config, "det_ar_max", 5.0),
+            # Merge / Confidence / Vertical line
+            "det_merge_dist": getattr(config, "det_merge_dist", 250),
+            "det_iou_thr": getattr(config, "det_iou_thr", 0.1),
+            "det_conf_thr": getattr(config, "det_conf_thr", 0.02),
+            "det_vline_min_h": getattr(config, "det_vline_min_h", 5),
+            # CLAHE
+            "det_clahe_clip": getattr(config, "det_clahe_clip", 2.0),
+            "det_clahe_grid": getattr(config, "det_clahe_grid", 8),
+            "use_clahe": getattr(config, "use_clahe", True),
         }
 
     def _apply_settings(self, data, config_name=None):
@@ -849,7 +950,7 @@ def _build_detection_tab(self):
                         self._set_btn_option_value(k, v)
 
             # --- Recharger le modèle si nécessaire ---
-            from detection import reload_model
+            from detection2 import reload_model
 
             self.tracker.model, self.tracker.class_names = reload_model()
 
@@ -937,6 +1038,9 @@ def _build_detection_tab(self):
         self.config_log.insert("end", msg + "\n")
         self.config_log.see("end")
 
+    def _on_enable_clahe_changed(self):
+        config.use_clahe = self.var_enable_clahe.get()
+
     # ----------------------- UI BUILDERS -----------------------
     def _build_general_tab(self):
         self.status_label = ctk.CTkLabel(self.tab_general, text="Status: Disconnected")
@@ -949,6 +1053,22 @@ def _build_detection_tab(self):
         self.udp_port_entry = ctk.CTkEntry(port_frame)
         self.udp_port_entry.insert(0, "8080")
         self.udp_port_entry.pack(side="left", fill="x", expand=True)
+
+        # UDP Buffer Size
+        buffer_frame = ctk.CTkFrame(self.tab_general)
+        buffer_frame.pack(pady=5, fill="x")
+        ctk.CTkLabel(buffer_frame, text="Buffer Size (MB)").pack(side="left", padx=6)
+        self.udp_buffer_entry = ctk.CTkEntry(buffer_frame)
+        self.udp_buffer_entry.insert(0, "64")
+        self.udp_buffer_entry.pack(side="left", fill="x", expand=True)
+
+        # Auto-reconnect checkbox
+        self.var_auto_reconnect = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            self.tab_general,
+            text="Auto-reconnect UDP",
+            variable=self.var_auto_reconnect,
+        ).pack(pady=6, anchor="w")
         btn_frame = ctk.CTkFrame(self.tab_general)
         btn_frame.pack(pady=5, fill="x")
         ctk.CTkButton(btn_frame, text="Start UDP", command=self._start_udp).pack(
@@ -1177,6 +1297,25 @@ def _build_detection_tab(self):
                 break
         self._log_config(f"Triggerbot button set to {val} ({key})")
 
+    def _on_detection_slider_changed(self, key, val, is_float):
+        v = float(val) if is_float else int(round(val))
+        setattr(config, key, v)
+        # Nếu cần reload model (HSV) khi thay đổi range:
+        if key in {
+            "det_h_min",
+            "det_h_max",
+            "det_s_min",
+            "det_s_max",
+            "det_v_min",
+            "det_v_max",
+        }:
+            try:
+                from detection2 import reload_model
+
+                self.tracker.model, self.tracker.class_names = reload_model()
+            except Exception:
+                pass
+
     def _on_fovsize_changed(self, val):
         config.fovsize = val
         self.tracker.fovsize = val
@@ -1219,15 +1358,30 @@ def _build_detection_tab(self):
             port = int(port_text) if port_text else 8080
         except Exception:
             port = 8080
+
+        try:
+            buffer_text = self.udp_buffer_entry.get().strip()
+            buffer_mb = int(buffer_text) if buffer_text else 64
+        except Exception:
+            buffer_mb = 64
+
         try:
             if self.udp_source is not None:
                 self._stop_udp()
-            self.udp_source = UdpFrameSource(host="0.0.0.0", port=port, rcvbuf_mb=64)
+            self.udp_source = UdpFrameSource(
+                host="0.0.0.0",
+                port=port,
+                rcvbuf_mb=buffer_mb,
+                jitter_buffer_size=5,
+                auto_reconnect=self.var_auto_reconnect.get(),
+                watchdog_timeout=5.0,
+            )
             ok = self.udp_source.start()
             self.connected = bool(ok)
             if ok:
                 self.status_label.configure(
-                    text=f"UDP listening on :{port}", text_color="green"
+                    text=f"UDP listening on :{port} (Buffer: {buffer_mb}MB)",
+                    text_color="green",
                 )
             else:
                 self.status_label.configure(
@@ -1253,9 +1407,19 @@ def _build_detection_tab(self):
                 self.connected = True
                 stats = self.udp_source.get_stats()
                 fps = stats.get("rt_fps", 0.0)
-                self.status_label.configure(
-                    text=f"UDP Connected — {fps:.1f} fps", text_color="green"
-                )
+                loss_rate = stats.get("estimated_loss_rate", 0.0)
+                connection_lost = stats.get("connection_lost", False)
+
+                if connection_lost:
+                    self.status_label.configure(
+                        text=f"UDP Connection Lost — Reconnecting...",
+                        text_color="orange",
+                    )
+                else:
+                    status_text = f"UDP Connected — {fps:.1f} fps"
+                    if loss_rate > 0.05:  # Show loss rate if > 5%
+                        status_text += f" (Loss: {loss_rate*100:.1f}%)"
+                    self.status_label.configure(text=status_text, text_color="green")
             else:
                 self.connected = False
                 self.status_label.configure(text="Disconnected", text_color="red")

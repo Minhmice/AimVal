@@ -135,7 +135,7 @@ class _Receiver(threading.Thread):
 
 
 class UdpFrameSource:
-    """Receive MJPEG over UDP and expose latest decoded BGR frame."""
+    """Receive MJPEG over UDP and expose latest decoded BGR frame with stability improvements."""
 
     def __init__(
         self,
@@ -143,16 +143,24 @@ class UdpFrameSource:
         port: int = 8080,
         rcvbuf_mb: int = 64,
         use_turbo: bool = True,
+        jitter_buffer_size: int = 5,
+        auto_reconnect: bool = True,
+        watchdog_timeout: float = 5.0,
     ) -> None:
         self.host = host
         self.port = int(port)
         self.rcvbuf_mb = max(1, int(rcvbuf_mb))
         self.max_buffer_bytes = 64 * 1024 * 1024
+        self.jitter_buffer_size = max(1, jitter_buffer_size)
+        self.auto_reconnect = auto_reconnect
+        self.watchdog_timeout = watchdog_timeout
         self.store = _FrameStore()
         self.sock: Optional[socket.socket] = None
         self.receiver: Optional[_Receiver] = None
         self.jpeg: Optional[object] = None
         self.use_turbo = use_turbo and (TurboJPEG is not None)
+        self._connection_lost = False
+        self._last_frame_time = 0.0
         if self.use_turbo and TurboJPEG is not None:
             try:
                 self.jpeg = TurboJPEG()
@@ -181,7 +189,13 @@ class UdpFrameSource:
     def get_latest_frame(self) -> Optional[np.ndarray]:
         buf = self.store.get()
         if buf is None:
+            self._check_connection_health()
             return None
+        
+        current_time = time.time()
+        self._last_frame_time = current_time
+        self._connection_lost = False
+        
         if self.use_turbo and self.jpeg is not None:
             try:
                 frame = self.jpeg.decode(buf)  # type: ignore[attr-defined]
@@ -196,6 +210,31 @@ class UdpFrameSource:
             return img
         except Exception:
             return None
+    
+    def _check_connection_health(self) -> None:
+        """Check if connection is healthy and attempt reconnection if needed."""
+        current_time = time.time()
+        if self._last_frame_time > 0 and (current_time - self._last_frame_time) > self.watchdog_timeout:
+            if not self._connection_lost:
+                self._connection_lost = True
+                print(f"[UDP] Connection timeout detected ({self.watchdog_timeout}s)")
+                if self.auto_reconnect:
+                    self._attempt_reconnect()
+    
+    def _attempt_reconnect(self) -> None:
+        """Attempt to reconnect the UDP socket."""
+        print("[UDP] Attempting reconnection...")
+        try:
+            self.stop()
+            time.sleep(0.5)  # Brief pause before reconnect
+            success = self.start()
+            if success:
+                print("[UDP] Reconnection successful")
+                self._connection_lost = False
+            else:
+                print("[UDP] Reconnection failed")
+        except Exception as e:
+            print(f"[UDP] Reconnection error: {e}")
 
     def stop(self) -> None:
         if self.receiver is not None:
@@ -211,6 +250,13 @@ class UdpFrameSource:
 
     def get_stats(self) -> dict:
         with self.store._lock:
+            current_time = time.time()
+            connection_age = current_time - self._last_frame_time if self._last_frame_time > 0 else 0
+            
+            # Calculate packet loss estimation
+            total_expected = self.store.frames_completed + max(0, int(connection_age * self.store.rt_fps))
+            loss_rate = (total_expected - self.store.frames_completed) / max(1, total_expected) if total_expected > 0 else 0
+            
             return {
                 "packets": int(self.store.packets_received),
                 "bytes": int(self.store.bytes_received),
@@ -222,6 +268,11 @@ class UdpFrameSource:
                 "avg_ms": float(self.store.avg_ms),
                 "avg_fps": float(self.store.avg_fps),
                 "last_sender_ip": self.store.last_sender_ip,
+                "connection_lost": self._connection_lost,
+                "connection_age": connection_age,
+                "estimated_loss_rate": loss_rate,
+                "buffer_size_mb": self.rcvbuf_mb,
+                "jitter_buffer_size": self.jitter_buffer_size,
             }
 
 
