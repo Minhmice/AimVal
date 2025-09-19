@@ -1,40 +1,39 @@
-from dataclasses import dataclass
 from typing import Optional, Any, Dict
 import time
 
 
-@dataclass
-class SourceStats:
-    frames: int = 0
-    rt_fps: float = 0.0
-    avg_fps: float = 0.0
-    last_frame_ns: int = 0
-    last_sender_ip: Optional[str] = None
-
-
 class FrameSource:
+    """Base class for all frame sources with minimal overhead."""
+    
     def __init__(self) -> None:
         self.started = False
-        self._t0_ns = 0
-        self._frames = 0
-        self.stats = SourceStats()
+        self._start_time_ns = 0
 
     def start(self) -> bool:
+        """Start the frame source."""
         self.started = True
-        self._t0_ns = time.monotonic_ns()
+        self._start_time_ns = time.monotonic_ns()
         return True
 
     def stop(self) -> None:
+        """Stop the frame source."""
         self.started = False
 
     def get_latest_frame(self) -> Optional[Any]:
+        """Get the latest frame. Must be implemented by subclasses."""
         raise NotImplementedError
 
     def get_stats(self) -> Dict[str, Any]:
+        """Get basic source statistics. Can be overridden by subclasses."""
+        uptime_ms = 0.0
+        if self.started and self._start_time_ns > 0:
+            uptime_ms = (time.monotonic_ns() - self._start_time_ns) / 1e6
+        
         return {
-            "frames": self.stats.frames,
-            "rt_fps": self.stats.rt_fps,
-            "avg_fps": self.stats.avg_fps,
-            "last_frame_ns": self.stats.last_frame_ns,
-            "last_sender_ip": self.stats.last_sender_ip,
+            "started": self.started,
+            "uptime_ms": uptime_ms,
         }
+
+    def is_connected(self) -> bool:
+        """Check if the source is connected/active. Can be overridden by subclasses."""
+        return self.started

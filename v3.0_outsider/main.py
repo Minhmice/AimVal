@@ -13,7 +13,7 @@ from udp_source import UdpFrameSource
 
 from config import config
 from mouse import Mouse, is_button_pressed
-from detection import load_model, perform_detection
+from detection2 import load_model, perform_detection
 
 
 BUTTONS = {
@@ -288,7 +288,6 @@ class AimTracker:
         )
 
     def _aim_and_move(self, targets, frame, img):
-
         aim_enabled = getattr(config, "enableaim", False)
         selected_btn = getattr(config, "selected_mouse_button", None)
 
@@ -322,9 +321,7 @@ class AimTracker:
 
         mode = getattr(config, "mode", "Normal")
         if mode == "Normal":
-
             try:
-
                 # --- AIMBOT ---
                 if (
                     aim_enabled
@@ -335,7 +332,6 @@ class AimTracker:
                     if distance_to_center < float(
                         getattr(config, "normalsmoothfov", self.normalsmoothfov)
                     ):
-
                         ndx *= float(
                             getattr(config, "normal_x_speed", self.normal_x_speed)
                         ) / max(
@@ -367,13 +363,13 @@ class AimTracker:
                     and is_button_pressed(getattr(config, "selected_tb_btn", None))
                     or is_button_pressed(getattr(config, "selected_2_tb", None))
                 ):
-
                     # Centre de l'écran
                     cx0, cy0 = int(frame.xres // 2), int(frame.yres // 2)
                     ROI_SIZE = 5  # petit carré autour du centre
                     x1, y1 = max(cx0 - ROI_SIZE, 0), max(cy0 - ROI_SIZE, 0)
-                    x2, y2 = min(cx0 + ROI_SIZE, img.shape[1]), min(
-                        cy0 + ROI_SIZE, img.shape[0]
+                    x2, y2 = (
+                        min(cx0 + ROI_SIZE, img.shape[1]),
+                        min(cy0 + ROI_SIZE, img.shape[0]),
                     )
                     roi = img[y1:y2, x1:x2]
 
@@ -439,9 +435,7 @@ class ViewerApp(ctk.CTk):
         self.geometry("400x700")
 
         # Dicos pour MAJ UI <-> config
-        self._slider_widgets = (
-            {}
-        )  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
+        self._slider_widgets = {}  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
         self._checkbox_vars = {}  # key -> tk.BooleanVar
         self._option_widgets = {}  # key -> CTkOptionMenu
 
@@ -449,6 +443,10 @@ class ViewerApp(ctk.CTk):
         self.udp_source = None
         self.connected = False
         # enlève la barre native
+
+        # Detection tab
+        self.tab_detection = self.tabview.add("🧪 Detection")
+        self._build_detection_tab()
 
         # barre custom
         self.title_bar = ctk.CTkFrame(self, height=30, corner_radius=0)
@@ -528,9 +526,9 @@ class ViewerApp(ctk.CTk):
         w["slider"].set(v)
         # Rafraîchir label
         txt = (
-            f"{key.replace('_',' ').title()}: {v:.2f}"
+            f"{key.replace('_', ' ').title()}: {v:.2f}"
             if is_float
-            else f"{key.replace('_',' ').title()}: {int(v)}"
+            else f"{key.replace('_', ' ').title()}: {int(v)}"
         )
         # On garde le libellé humain (X Speed etc.) si déjà présent
         current = w["label"].cget("text")
@@ -555,6 +553,7 @@ class ViewerApp(ctk.CTk):
             menu.set(str(value_str))
 
     # -------------- Tab Config --------------
+
     def _build_config_tab(self):
         os.makedirs("configs", exist_ok=True)
 
@@ -579,6 +578,207 @@ class ViewerApp(ctk.CTk):
         self.config_log.pack(pady=10, fill="both", expand=True)
 
         self._refresh_config_list()
+
+    # -------------- Tab Detection --------------
+
+
+def _build_detection_tab(self):
+    # Helper để tránh lặp
+    def add_slider_row(key, text, vmin, vmax, init, is_float=True, step=None):
+        s, l = self._add_slider_with_label(
+            self.tab_detection,
+            text,
+            vmin,
+            vmax,
+            init,
+            lambda val: self._on_detection_slider_changed(key, val, is_float),
+            is_float=is_float,
+        )
+        # number_of_steps đã set trong _add_slider_with_label theo is_float
+        self._register_slider(key, s, l, vmin, vmax, is_float)
+
+    # HSV ranges
+    add_slider_row(
+        "det_h_min",
+        "Hue Min",
+        0,
+        179,
+        float(getattr(config, "det_h_min", 30)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_h_max",
+        "Hue Max",
+        0,
+        179,
+        float(getattr(config, "det_h_max", 160)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_s_min",
+        "Sat Min",
+        0,
+        255,
+        float(getattr(config, "det_s_min", 125)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_s_max",
+        "Sat Max",
+        0,
+        255,
+        float(getattr(config, "det_s_max", 255)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_v_min",
+        "Val Min",
+        0,
+        255,
+        float(getattr(config, "det_v_min", 150)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_v_max",
+        "Val Max",
+        0,
+        255,
+        float(getattr(config, "det_v_max", 255)),
+        is_float=False,
+    )
+
+    # Morphology
+    add_slider_row(
+        "det_close_kw",
+        "Morph Close Kernel W",
+        1,
+        65,
+        float(getattr(config, "det_close_kw", 15)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_close_kh",
+        "Morph Close Kernel H",
+        1,
+        65,
+        float(getattr(config, "det_close_kh", 30)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_dilate_k",
+        "Dilation Kernel Size",
+        1,
+        65,
+        float(getattr(config, "det_dilate_k", 15)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_dilate_iter",
+        "Dilation Iterations",
+        0,
+        5,
+        float(getattr(config, "det_dilate_iter", 1)),
+        is_float=False,
+    )
+
+    # Contour filters
+    add_slider_row(
+        "det_min_area",
+        "Min Area (px^2)",
+        0,
+        300000,
+        float(getattr(config, "det_min_area", 80)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_max_area",
+        "Max Area (px^2)",
+        1000,
+        1000000,
+        float(getattr(config, "det_max_area", 200000)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_ar_min",
+        "Aspect Ratio Min",
+        0.05,
+        3.0,
+        float(getattr(config, "det_ar_min", 0.2)),
+        is_float=True,
+    )
+    add_slider_row(
+        "det_ar_max",
+        "Aspect Ratio Max",
+        0.2,
+        10.0,
+        float(getattr(config, "det_ar_max", 5.0)),
+        is_float=True,
+    )
+
+    # Merge / Confidence / Vertical line
+    add_slider_row(
+        "det_merge_dist",
+        "Merge Distance",
+        10,
+        600,
+        float(getattr(config, "det_merge_dist", 250)),
+        is_float=False,
+    )
+    add_slider_row(
+        "det_iou_thr",
+        "Merge IoU Threshold",
+        0.0,
+        1.0,
+        float(getattr(config, "det_iou_thr", 0.1)),
+        is_float=True,
+    )
+    add_slider_row(
+        "det_conf_thr",
+        "Confidence Threshold (0-1)",
+        0.0,
+        1.0,
+        float(getattr(config, "det_conf_thr", 0.02)),
+        is_float=True,
+    )
+    add_slider_row(
+        "det_vline_min_h",
+        "Vertical Line Min Height (px)",
+        0,
+        200,
+        float(getattr(config, "det_vline_min_h", 5)),
+        is_float=False,
+    )
+
+    # CLAHE
+    add_slider_row(
+        "det_clahe_clip",
+        "CLAHE Clip Limit",
+        1.0,
+        6.0,
+        float(getattr(config, "det_clahe_clip", 2.0)),
+        is_float=True,
+    )
+    add_slider_row(
+        "det_clahe_grid",
+        "CLAHE Grid Size",
+        4,
+        32,
+        float(getattr(config, "det_clahe_grid", 8)),
+        is_float=False,
+    )
+
+    # Gợi ý: thêm checkbox Enable CLAHE nếu muốn
+    self.var_enable_clahe = tk.BooleanVar(
+        value=bool(getattr(config, "use_clahe", True))
+    )
+    cb = ctk.CTkCheckBox(
+        self.tab_detection,
+        text="Enable CLAHE",
+        variable=self.var_enable_clahe,
+        command=self._on_enable_clahe_changed,
+    )
+    cb.pack(pady=6, anchor="w")
+    self._checkbox_vars["use_clahe"] = self.var_enable_clahe
 
     def start_move(self, event):
         self._x = event.x
@@ -641,7 +841,6 @@ class ViewerApp(ctk.CTk):
             # --- Mettre à jour les OptionMenu ---
             for k, v in data.items():
                 if k == "selected_mouse_button" or k == "selected_tb_btn":
-
                     if k in self._option_widgets:
                         print(k, v)
 
@@ -1027,9 +1226,13 @@ class ViewerApp(ctk.CTk):
             ok = self.udp_source.start()
             self.connected = bool(ok)
             if ok:
-                self.status_label.configure(text=f"UDP listening on :{port}", text_color="green")
+                self.status_label.configure(
+                    text=f"UDP listening on :{port}", text_color="green"
+                )
             else:
-                self.status_label.configure(text="Failed to start UDP", text_color="red")
+                self.status_label.configure(
+                    text="Failed to start UDP", text_color="red"
+                )
         except Exception as e:
             self.connected = False
             self.status_label.configure(text=f"UDP error: {e}", text_color="red")

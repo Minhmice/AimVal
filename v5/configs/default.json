@@ -1,11 +1,10 @@
 {
   "udp": {
-    "mode": "mjpeg",
+    "mode": "udp_viewer_2",
     "url": "udp://@:8080",
     "mjpeg_port": 8080,
-    "max_width": 1280,
-    "max_height": 720,
-    "reconnect_interval_ms": 500
+    "rcvbuf_mb": 64,
+    "use_turbojpeg": true
   },
   "visual": {
     "show_boxes": true,
@@ -30,35 +29,8 @@
       255,
       255
     ],
-    "morph_kernel": 3,
-    "min_area": 150,
-    "merge_iou": 0.2,
-    "profiles": {
-      "yellow": [
-        [
-          20,
-          100,
-          100
-        ],
-        [
-          35,
-          255,
-          255
-        ]
-      ],
-      "purple": [
-        [
-          130,
-          60,
-          60
-        ],
-        [
-          155,
-          255,
-          255
-        ]
-      ]
-    }
+    "morph_kernel": 3.0,
+    "min_area": 150.0
   },
   "ai": {
     "enabled": true,
@@ -87,14 +59,14 @@
     "trails": false
   },
   "logging": {
-    "enabled": true,
+    "enabled": false,
     "csv_path": "logs/metrics.csv",
     "log_every_n_frames": 20,
     "include_per_stage_timing": false
   },
   "actions": {
     "aim_enabled": false,
-    "trigger_enabled": false,
+    "trigger_enabled": true,
     "mouse_sensitivity": 0.35,
     "mouse_smoothness": 0.8,
     "trigger_delay_ms": 10.0,
@@ -105,5 +77,80 @@
     "title": "AimVal v5",
     "theme": "dark",
     "scale": 1.0
-  }
+  },
+  "AIM_ASSIST_RANGE": 23.0,
+  "AIM_VERTICAL_DAMPING_FACTOR": 0.15,
+  "AIM_ASSIST_DELAY": 0.07999999999999996,
+  "AIM_HEADSHOT_MODE": true,
+  "HEADSHOT_OFFSET_PERCENT": 18.0,
+  "DEADZONE": 4.5,
+  "AIM_MODE": "Hybrid",
+  "WINDMOUSE_G": 7.0,
+  "WINDMOUSE_W": 3.0,
+  "WINDMOUSE_M": 12.0,
+  "WINDMOUSE_D": 10.0,
+  "TARGET_LOCK_THRESHOLD": 8.0,
+  "AIM_ACQUIRING_SPEED": 0.15,
+  "AIM_TRACKING_SPEED": 0.040000000000000036,
+  "AIM_JITTER": 0.0,
+  "MOUSE_EASE_OUT": true,
+  "USE_WINDMOUSE": false,
+  "MOUSE_STEP_DELAY_MS": 1.0,
+  "MOUSE_SPEED_MULTIPLIER": 1.0,
+  "MOUSE_1_BUTTON": "left",
+  "MOUSE_2_BUTTON": "mouse5",
+  "MOUSE_1_MODE": "hold",
+  "MOUSE_2_MODE": "hold",
+  "mouse_dpi": 800.0,
+  "in_game_sens": 0.235,
+  "fovsize": 100.0,
+  "normalsmoothfov": 30.0,
+  "FOV_RESOLUTION": "256x256",
+  "tbfovsize": 5.0,
+  "tbdelay": 0.5,
+  "TRIGGER_MODE": "instant",
+  "TRIGGER_WEAPON_MODE": "auto",
+  "TRIGGER_BURST_COUNT": 3.0,
+  "TRIGGER_BURST_DELAY": 0.05,
+  "TRIGGER_SIZE_FACTOR": 1.0,
+  "TRIGGER_DISTANCE_FACTOR": 1.0,
+  "TRIGGER_MIN_COOLDOWN": 0.05,
+  "TRIGGER_MAX_DELAY_MS": 100.0,
+  "TRIGGER_TARGET_PRIORITY": "center",
+  "TRIGGER_TARGET_FILTER": true,
+  "TRIGGER_MIN_TARGET_SIZE": 5.0,
+  "TRIGGER_MAX_TARGET_SIZE": 100.0,
+  "TRIGGER_TARGET_CONFIDENCE": 0.7,
+  "TRIGGER_RANDOM_DELAY": false,
+  "TRIGGER_RANDOM_MIN": 5.0,
+  "TRIGGER_RANDOM_MAX": 15.0,
+  "TRIGGER_SMOOTHING": true,
+  "TRIGGER_SMOOTHING_FACTOR": 0.8,
+  "TRIGGER_PREDICTION": false,
+  "TRIGGER_PREDICTION_TIME": 0.1,
+  "selected_tb_btn": 4,
+  "DILATE_ITERATIONS": 2.0,
+  "DILATE_KERNEL_WIDTH": 3.0,
+  "DILATE_KERNEL_HEIGHT": 3.0,
+  "ERODE_ITERATIONS": 1.0,
+  "ERODE_KERNEL_WIDTH": 2.0,
+  "ERODE_KERNEL_HEIGHT": 2.0,
+  "SANDWICH_CHECK_HEIGHT": 15.0,
+  "SANDWICH_CHECK_SCAN_WIDTH": 5.0,
+  "enable_sandwich_check": true,
+  "contour_approximation": 0.02,
+  "aspect_ratio_min": 0.3,
+  "aspect_ratio_max": 3.0,
+  "solidity_min": 0.3,
+  "extent_min": 0.3,
+  "gaussian_blur_kernel": 0,
+  "median_blur_kernel": 0,
+  "bilateral_filter_d": 0,
+  "bilateral_sigma_color": 75.0,
+  "bilateral_sigma_space": 75.0,
+  "hsv_saturation_boost": 1.0,
+  "hsv_value_boost": 1.0,
+  "adaptive_threshold_enabled": false,
+  "adaptive_threshold_block_size": 11,
+  "adaptive_threshold_c": 2.0
 }
