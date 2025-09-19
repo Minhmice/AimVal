@@ -13,7 +13,7 @@ from udp_source import UdpFrameSource
 
 from config import config
 from mouse import Mouse, is_button_pressed
-from detection2 import load_model, perform_detection, reload_model
+from detection import load_model, perform_detection, reload_model
 
 
 BUTTONS = {
