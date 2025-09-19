@@ -174,18 +174,39 @@ class AimTracker:
                     x1, y1 = int(x), int(y)
                     x2, y2 = int(x + w), int(y + h)
                     y1 *= 1.03
-                    # Dessin corps
-                    self._draw_body(bgr_img, x1, y1, x2, y2, conf)
-                    # Estimation têtes dans la bbox
-                    head_positions = self._estimate_head_positions(
-                        x1, y1, x2, y2, bgr_img
-                    )
-                    for head_cx, head_cy, bbox in head_positions:
-                        self._draw_head_bbox(bgr_img, head_cx, head_cy)
+                    # Draw based on detection type with different colors
+                    if det.get("type") == "body" and getattr(config, "show_body_box", True):
+                        self._draw_body(bgr_img, x1, y1, x2, y2, conf)
+                        # Body center for targeting
+                        body_cx = x1 + w // 2
+                        body_cy = y1 + h // 2  
+                        d = math.hypot(
+                            body_cx - frame.xres / 2.0, body_cy - frame.yres / 2.0
+                        )
+                        targets.append((body_cx, body_cy, d, "body"))
+                        
+                    elif det.get("type") == "head" and getattr(config, "show_head_box", True):
+                        self._draw_head_bbox_new(bgr_img, x1, y1, x2, y2, conf)
+                        # Head center for targeting (more precise)
+                        head_cx = x1 + w // 2
+                        head_cy = y1 + h // 2
                         d = math.hypot(
                             head_cx - frame.xres / 2.0, head_cy - frame.yres / 2.0
                         )
-                        targets.append((head_cx, head_cy, d))
+                        targets.append((head_cx, head_cy, d, "head"))
+                        
+                    else:
+                        # Legacy support - old detection format
+                        self._draw_body(bgr_img, x1, y1, x2, y2, conf)
+                        head_positions = self._estimate_head_positions(
+                            x1, y1, x2, y2, bgr_img
+                        )
+                        for head_cx, head_cy, bbox in head_positions:
+                            self._draw_head_bbox(bgr_img, head_cx, head_cy)
+                            d = math.hypot(
+                                head_cx - frame.xres / 2.0, head_cy - frame.yres / 2.0
+                            )
+                            targets.append((head_cx, head_cy, d, "head"))
                 except Exception as e:
                     print("Erreur dans _estimate_head_positions:", e)
 
@@ -276,16 +297,62 @@ class AimTracker:
         return results
 
     def _draw_body(self, img, x1, y1, x2, y2, conf):
-        cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+        """Draw body bounding box in BLUE"""
+        cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 3)  # Blue for body
         cv2.putText(
             img,
-            f"Body {conf:.2f}",
-            (int(x1), int(y1) - 6),
+            f"BODY {conf:.2f}",
+            (int(x1), int(y1) - 8),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 0, 0),
+            0.7,
+            (255, 0, 0),  # Blue text
             2,
         )
+        # Add corner markers for better visibility
+        corner_size = 8
+        cv2.line(img, (int(x1), int(y1)), (int(x1 + corner_size), int(y1)), (255, 0, 0), 4)
+        cv2.line(img, (int(x1), int(y1)), (int(x1), int(y1 + corner_size)), (255, 0, 0), 4)
+        cv2.line(img, (int(x2), int(y2)), (int(x2 - corner_size), int(y2)), (255, 0, 0), 4)
+        cv2.line(img, (int(x2), int(y2)), (int(x2), int(y2 - corner_size)), (255, 0, 0), 4)
+    
+    def _draw_head_bbox_new(self, img, x1, y1, x2, y2, conf):
+        """Draw head bounding box in RED with different style"""
+        # Main rectangle in RED
+        cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 3)  # Red for head
+        
+        # Add cross-hair in center
+        center_x = int((x1 + x2) / 2)
+        center_y = int((y1 + y2) / 2)
+        cross_size = 6
+        cv2.line(img, (center_x - cross_size, center_y), (center_x + cross_size, center_y), (0, 0, 255), 2)
+        cv2.line(img, (center_x, center_y - cross_size), (center_x, center_y + cross_size), (0, 0, 255), 2)
+        
+        # Text label
+        cv2.putText(
+            img,
+            f"HEAD {conf:.2f}",
+            (int(x1), int(y1) - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 0, 255),  # Red text
+            2,
+        )
+        
+        # Corner brackets for head (different from body)
+        bracket_size = 6
+        thickness = 3
+        # Top-left bracket
+        cv2.line(img, (int(x1), int(y1 + bracket_size)), (int(x1), int(y1)), (0, 255, 255), thickness)
+        cv2.line(img, (int(x1), int(y1)), (int(x1 + bracket_size), int(y1)), (0, 255, 255), thickness)
+        # Top-right bracket  
+        cv2.line(img, (int(x2 - bracket_size), int(y1)), (int(x2), int(y1)), (0, 255, 255), thickness)
+        cv2.line(img, (int(x2), int(y1)), (int(x2), int(y1 + bracket_size)), (0, 255, 255), thickness)
+        # Bottom-left bracket
+        cv2.line(img, (int(x1), int(y2 - bracket_size)), (int(x1), int(y2)), (0, 255, 255), thickness)
+        cv2.line(img, (int(x1), int(y2)), (int(x1 + bracket_size), int(y2)), (0, 255, 255), thickness)
+        # Bottom-right bracket
+        cv2.line(img, (int(x2 - bracket_size), int(y2)), (int(x2), int(y2)), (0, 255, 255), thickness)
+        cv2.line(img, (int(x2), int(y2)), (int(x2), int(y2 - bracket_size)), (0, 255, 255), thickness)
 
     def _aim_and_move(self, targets, frame, img):
         aim_enabled = getattr(config, "enableaim", False)
@@ -293,16 +360,35 @@ class AimTracker:
 
         center_x = frame.xres / 2.0
         center_y = frame.yres / 2.0
-        # --- Si pas de target, on saute l'aimbot mais on continue triggerbot ---
+        # --- Target selection with priority (head > body) ---
         if not targets:
             cx, cy, distance_to_center = center_x, center_y, float("inf")
+            target_type = "none"
         else:
-            # Sélectionne la meilleure target
-            best_target = min(targets, key=lambda t: t[2])
-            cx, cy, _ = best_target
-            distance_to_center = math.hypot(cx - center_x, cy - center_y)
+            # Prioritize head targets over body targets
+            head_targets = [t for t in targets if len(t) > 3 and t[3] == "head"]
+            body_targets = [t for t in targets if len(t) > 3 and t[3] == "body"]
+            
+            if head_targets:
+                # Prefer closest head
+                best_target = min(head_targets, key=lambda t: t[2])
+                cx, cy, distance_to_center, target_type = best_target[0], best_target[1], best_target[2], best_target[3]
+            elif body_targets:
+                # Fallback to closest body
+                best_target = min(body_targets, key=lambda t: t[2])
+                cx, cy, distance_to_center, target_type = best_target[0], best_target[1], best_target[2], best_target[3]
+            else:
+                # Legacy format
+                best_target = min(targets, key=lambda t: t[2])
+                cx, cy, distance_to_center = best_target[0], best_target[1], best_target[2]
+                target_type = "legacy"
+                
             if distance_to_center > float(getattr(config, "fovsize", self.fovsize)):
                 return
+                
+            # Visual indicator of selected target
+            cv2.circle(img, (int(cx), int(cy)), 4, (0, 255, 0), -1)  # Green dot for selected target
+            cv2.putText(img, f"TARGET: {target_type.upper()}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         dx = cx - center_x
         dy = cy - center_y
@@ -328,6 +414,7 @@ class AimTracker:
                     and selected_btn is not None
                     and is_button_pressed(selected_btn)
                     and targets
+                    and target_type != "none"
                 ):
                     if distance_to_center < float(
                         getattr(config, "normalsmoothfov", self.normalsmoothfov)
@@ -570,7 +657,7 @@ class ViewerApp(ctk.CTk):
     def _load_initial_config(self):
         try:
             import json, os
-            from detection2 import reload_model
+            from detection import reload_model
 
             if os.path.exists("configs/default.json"):
                 with open("configs/default.json", "r") as f:
@@ -655,10 +742,36 @@ class ViewerApp(ctk.CTk):
     def _build_detection_tab(self):
         # Create smooth scrollable frame specifically for detection parameters
         scrollable_detection = self._create_detection_scrollable_frame(self.tab_detection)
+        
+        # Add display toggle buttons at the top
+        toggle_frame = ctk.CTkFrame(scrollable_detection)
+        toggle_frame.pack(pady=10, fill="x", padx=10)
+        
+        ctk.CTkLabel(toggle_frame, text="Display Options:", font=("Arial", 14, "bold")).pack(pady=5)
+        
+        # Show Body Box toggle
+        self.var_show_body = tk.BooleanVar(value=getattr(config, "show_body_box", True))
+        ctk.CTkCheckBox(
+            toggle_frame,
+            text="Show Body Boxes",
+            variable=self.var_show_body,
+            command=self._on_show_body_changed,
+        ).pack(pady=2, anchor="w")
+        self._checkbox_vars["show_body_box"] = self.var_show_body
+        
+        # Show Head Box toggle  
+        self.var_show_head = tk.BooleanVar(value=getattr(config, "show_head_box", True))
+        ctk.CTkCheckBox(
+            toggle_frame,
+            text="Show Head Boxes",
+            variable=self.var_show_head,
+            command=self._on_show_head_changed,
+        ).pack(pady=2, anchor="w")
+        self._checkbox_vars["show_head_box"] = self.var_show_head
 
-        def add_slider_row(key, text, vmin, vmax, init, is_float):
-            s, l = self._add_slider_with_label(
-                scrollable_detection,  # Use scrollable frame instead of tab_detection
+        def add_slider_row(key, text, vmin, vmax, init, is_float, tooltip=""):
+            s, l = self._add_slider_with_label_and_tooltip(
+                scrollable_detection,
                 text,
                 vmin,
                 vmax,
@@ -667,91 +780,180 @@ class ViewerApp(ctk.CTk):
                     k, val, f
                 ),
                 is_float=is_float,
+                tooltip=tooltip
             )
             self._register_slider(key, s, l, vmin, vmax, is_float)
 
-        # HSV ranges
+        # === BODY DETECTION PARAMETERS ===
+        body_section = ctk.CTkLabel(scrollable_detection, text="🔵 BODY DETECTION", font=("Arial", 16, "bold"))
+        body_section.pack(pady=(15, 5), anchor="w")
+        
+        # Body HSV ranges
         add_slider_row(
-            "det_h_min",
-            "Hue Min",
-            0,
-            179,
-            float(getattr(config, "det_h_min", 30)),
-            False,
+            "det_body_h_min", "Body Hue Min", 0.0, 179.0, 
+            float(getattr(config, "det_body_h_min", 30.0)), True,
+            "Giá trị Hue tối thiểu để detect body (0-179). Hue quyết định màu sắc cơ bản."
         )
         add_slider_row(
-            "det_h_max",
-            "Hue Max",
-            0,
-            179,
-            float(getattr(config, "det_h_max", 160)),
-            False,
+            "det_body_h_max", "Body Hue Max", 0.0, 179.0,
+            float(getattr(config, "det_body_h_max", 160.0)), True,
+            "Giá trị Hue tối đa để detect body. Khoảng Hue càng rộng thì detect càng nhiều màu."
         )
         add_slider_row(
-            "det_s_min",
-            "Sat Min",
-            0,
-            255,
-            float(getattr(config, "det_s_min", 125)),
-            False,
+            "det_body_s_min", "Body Sat Min", 0.0, 255.0,
+            float(getattr(config, "det_body_s_min", 125.0)), True,
+            "Độ bão hòa màu tối thiểu cho body. Giá trị cao = màu sắc rõ nét, thấp = màu nhạt."
         )
         add_slider_row(
-            "det_s_max",
-            "Sat Max",
-            0,
-            255,
-            float(getattr(config, "det_s_max", 255)),
-            False,
+            "det_body_s_max", "Body Sat Max", 0.0, 255.0,
+            float(getattr(config, "det_body_s_max", 255.0)), True,
+            "Độ bão hòa màu tối đa cho body. 255 = chấp nhận tất cả độ bão hòa."
         )
         add_slider_row(
-            "det_v_min",
-            "Val Min",
-            0,
-            255,
-            float(getattr(config, "det_v_min", 150)),
-            False,
+            "det_body_v_min", "Body Val Min", 0.0, 255.0,
+            float(getattr(config, "det_body_v_min", 150.0)), True,
+            "Độ sáng tối thiểu cho body. Giá trị cao = chỉ detect vùng sáng, thấp = cả vùng tối."
         )
         add_slider_row(
-            "det_v_max",
-            "Val Max",
-            0,
-            255,
-            float(getattr(config, "det_v_max", 255)),
-            False,
+            "det_body_v_max", "Body Val Max", 0.0, 255.0,
+            float(getattr(config, "det_body_v_max", 255.0)), True,
+            "Độ sáng tối đa cho body. 255 = chấp nhận tất cả độ sáng."
+        )
+        
+        # === HEAD DETECTION PARAMETERS ===
+        head_section = ctk.CTkLabel(scrollable_detection, text="🔴 HEAD DETECTION", font=("Arial", 16, "bold"))
+        head_section.pack(pady=(15, 5), anchor="w")
+        
+        # Head HSV ranges  
+        add_slider_row(
+            "det_head_h_min", "Head Hue Min", 0.0, 179.0,
+            float(getattr(config, "det_head_h_min", 25.0)), True,
+            "Giá trị Hue tối thiểu để detect head. Thường khác với body để phân biệt."
+        )
+        add_slider_row(
+            "det_head_h_max", "Head Hue Max", 0.0, 179.0,
+            float(getattr(config, "det_head_h_max", 170.0)), True,
+            "Giá trị Hue tối đa để detect head. Điều chỉnh để tách biệt với body."
+        )
+        add_slider_row(
+            "det_head_s_min", "Head Sat Min", 0.0, 255.0,
+            float(getattr(config, "det_head_s_min", 100.0)), True,
+            "Độ bão hòa tối thiểu cho head. Head thường có màu khác body nên cần tune riêng."
+        )
+        add_slider_row(
+            "det_head_s_max", "Head Sat Max", 0.0, 255.0,
+            float(getattr(config, "det_head_s_max", 255.0)), True,
+            "Độ bão hòa tối đa cho head."
+        )
+        add_slider_row(
+            "det_head_v_min", "Head Val Min", 0.0, 255.0,
+            float(getattr(config, "det_head_v_min", 120.0)), True,
+            "Độ sáng tối thiểu cho head. Head có thể sáng/tối khác body."
+        )
+        add_slider_row(
+            "det_head_v_max", "Head Val Max", 0.0, 255.0,
+            float(getattr(config, "det_head_v_max", 255.0)), True,
+            "Độ sáng tối đa cho head."
         )
 
-        # Morphology
+        # === PRE-PROCESSING PARAMETERS ===
+        preprocess_section = ctk.CTkLabel(scrollable_detection, text="🔧 PRE-PROCESSING", font=("Arial", 16, "bold"))
+        preprocess_section.pack(pady=(15, 5), anchor="w")
+        
         add_slider_row(
-            "det_close_kw",
-            "Morph Close Kernel W",
-            1,
-            65,
-            float(getattr(config, "det_close_kw", 15)),
-            False,
+            "det_blur_kernel", "Blur Kernel Size", 1.0, 15.0,
+            float(getattr(config, "det_blur_kernel", 3.0)), True,
+            "Kích thước kernel làm mờ ảnh. Giá trị lẻ, càng lớn càng mờ, giúp giảm noise."
         )
         add_slider_row(
-            "det_close_kh",
-            "Morph Close Kernel H",
-            1,
-            65,
-            float(getattr(config, "det_close_kh", 30)),
-            False,
+            "det_blur_sigma", "Blur Sigma", 0.0, 5.0,
+            float(getattr(config, "det_blur_sigma", 1.0)), True,
+            "Độ mạnh của Gaussian blur. 0 = box blur, > 0 = Gaussian blur mượt hơn."
         )
         add_slider_row(
-            "det_dilate_k",
-            "Dilation Kernel Size",
-            1,
-            65,
-            float(getattr(config, "det_dilate_k", 15)),
-            False,
+            "det_gamma", "Gamma Correction", 0.1, 3.0,
+            float(getattr(config, "det_gamma", 1.0)), True,
+            "Hiệu chỉnh gamma. < 1 = làm sáng vùng tối, > 1 = làm tối vùng sáng."
         )
         add_slider_row(
-            "det_dilate_iter",
-            "Dilation Iterations",
-            0,
-            5,
-            float(getattr(config, "det_dilate_iter", 1)),
-            False,
+            "det_brightness", "Brightness", -100.0, 100.0,
+            float(getattr(config, "det_brightness", 0.0)), True,
+            "Điều chỉnh độ sáng. Âm = tối hơn, dương = sáng hơn."
+        )
+        add_slider_row(
+            "det_contrast", "Contrast", 0.1, 3.0,
+            float(getattr(config, "det_contrast", 1.0)), True,
+            "Điều chỉnh độ tương phản. < 1 = giảm contrast, > 1 = tăng contrast."
+        )
+        
+        # === BODY MORPHOLOGY ===
+        body_morph_section = ctk.CTkLabel(scrollable_detection, text="🔵 BODY MORPHOLOGY", font=("Arial", 16, "bold"))
+        body_morph_section.pack(pady=(15, 5), anchor="w")
+        
+        add_slider_row(
+            "det_body_close_kw", "Body Close Kernel W", 1.0, 65.0,
+            float(getattr(config, "det_body_close_kw", 15.0)), True,
+            "Chiều rộng kernel đóng lỗ hổng cho body. Lớn = đóng lỗ lớn hơn."
+        )
+        add_slider_row(
+            "det_body_close_kh", "Body Close Kernel H", 1.0, 65.0,
+            float(getattr(config, "det_body_close_kh", 30.0)), True,
+            "Chiều cao kernel đóng lỗ hổng cho body."
+        )
+        add_slider_row(
+            "det_body_dilate_k", "Body Dilate Kernel", 1.0, 65.0,
+            float(getattr(config, "det_body_dilate_k", 15.0)), True,
+            "Kích thước kernel mở rộng body. Lớn = body phình to hơn."
+        )
+        add_slider_row(
+            "det_body_dilate_iter", "Body Dilate Iterations", 0.0, 10.0,
+            float(getattr(config, "det_body_dilate_iter", 1.0)), True,
+            "Số lần lặp mở rộng body. Nhiều = body càng to."
+        )
+        add_slider_row(
+            "det_body_erode_k", "Body Erode Kernel", 1.0, 65.0,
+            float(getattr(config, "det_body_erode_k", 3.0)), True,
+            "Kích thước kernel co nhỏ body. Dùng để loại bỏ noise nhỏ."
+        )
+        add_slider_row(
+            "det_body_erode_iter", "Body Erode Iterations", 0.0, 10.0,
+            float(getattr(config, "det_body_erode_iter", 1.0)), True,
+            "Số lần lặp co nhỏ body."
+        )
+        
+        # === HEAD MORPHOLOGY ===
+        head_morph_section = ctk.CTkLabel(scrollable_detection, text="🔴 HEAD MORPHOLOGY", font=("Arial", 16, "bold"))
+        head_morph_section.pack(pady=(15, 5), anchor="w")
+        
+        add_slider_row(
+            "det_head_close_kw", "Head Close Kernel W", 1.0, 65.0,
+            float(getattr(config, "det_head_close_kw", 8.0)), True,
+            "Chiều rộng kernel đóng lỗ hổng cho head. Head nhỏ nên kernel nhỏ hơn body."
+        )
+        add_slider_row(
+            "det_head_close_kh", "Head Close Kernel H", 1.0, 65.0,
+            float(getattr(config, "det_head_close_kh", 12.0)), True,
+            "Chiều cao kernel đóng lỗ hổng cho head."
+        )
+        add_slider_row(
+            "det_head_dilate_k", "Head Dilate Kernel", 1.0, 65.0,
+            float(getattr(config, "det_head_dilate_k", 5.0)), True,
+            "Kích thước kernel mở rộng head."
+        )
+        add_slider_row(
+            "det_head_dilate_iter", "Head Dilate Iterations", 0.0, 10.0,
+            float(getattr(config, "det_head_dilate_iter", 1.0)), True,
+            "Số lần lặp mở rộng head."
+        )
+        add_slider_row(
+            "det_head_erode_k", "Head Erode Kernel", 1.0, 65.0,
+            float(getattr(config, "det_head_erode_k", 2.0)), True,
+            "Kích thước kernel co nhỏ head."
+        )
+        add_slider_row(
+            "det_head_erode_iter", "Head Erode Iterations", 0.0, 10.0,
+            float(getattr(config, "det_head_erode_iter", 1.0)), True,
+            "Số lần lặp co nhỏ head."
         )
 
         # Contour filters
@@ -822,36 +1024,103 @@ class ViewerApp(ctk.CTk):
             False,
         )
 
-        # CLAHE
+        # === ADVANCED FILTERS ===
+        advanced_section = ctk.CTkLabel(scrollable_detection, text="⚙️ ADVANCED FILTERS", font=("Arial", 16, "bold"))
+        advanced_section.pack(pady=(15, 5), anchor="w")
+        
         add_slider_row(
-            "det_clahe_clip",
-            "CLAHE Clip Limit",
-            1.0,
-            6.0,
-            float(getattr(config, "det_clahe_clip", 2.0)),
-            True,
+            "det_edge_threshold1", "Edge Detection Low", 0.0, 300.0,
+            float(getattr(config, "det_edge_threshold1", 50.0)), True,
+            "Ngưỡng thấp cho Canny edge detection. Thấp = detect nhiều edge, cao = ít edge."
         )
         add_slider_row(
-            "det_clahe_grid",
-            "CLAHE Grid Size",
-            4,
-            32,
-            float(getattr(config, "det_clahe_grid", 8)),
-            False,
+            "det_edge_threshold2", "Edge Detection High", 0.0, 500.0,
+            float(getattr(config, "det_edge_threshold2", 150.0)), True,
+            "Ngưỡng cao cho Canny edge detection. Phải > ngưỡng thấp."
         )
-
+        add_slider_row(
+            "det_contour_epsilon", "Contour Approximation", 0.001, 0.1,
+            float(getattr(config, "det_contour_epsilon", 0.02)), True,
+            "Độ chính xác xấp xỉ contour. Thấp = chính xác hơn, cao = đơn giản hóa nhiều."
+        )
+        add_slider_row(
+            "det_min_contour_points", "Min Contour Points", 3.0, 50.0,
+            float(getattr(config, "det_min_contour_points", 5.0)), True,
+            "Số điểm tối thiểu của contour. Ít = chấp nhận hình đơn giản, nhiều = hình phức tạp."
+        )
+        
+        # === MERGE & VALIDATION ===
+        merge_section = ctk.CTkLabel(scrollable_detection, text="🔗 MERGE & VALIDATION", font=("Arial", 16, "bold"))
+        merge_section.pack(pady=(15, 5), anchor="w")
+        
+        add_slider_row(
+            "det_merge_dist", "Merge Distance", 10.0, 1000.0,
+            float(getattr(config, "det_merge_dist", 250.0)), True,
+            "Khoảng cách tối đa để gộp 2 detection thành 1. Lớn = gộp xa hơn."
+        )
+        add_slider_row(
+            "det_iou_thr", "IoU Merge Threshold", 0.0, 1.0,
+            float(getattr(config, "det_iou_thr", 0.1)), True,
+            "Ngưỡng IoU để gộp bbox chồng lấp. Cao = chỉ gộp khi chồng nhiều."
+        )
+        add_slider_row(
+            "det_body_conf_thr", "Body Confidence", 0.0, 1.0,
+            float(getattr(config, "det_body_conf_thr", 0.02)), True,
+            "Ngưỡng confidence cho body. Cao = chỉ chấp nhận body chắc chắn."
+        )
+        add_slider_row(
+            "det_head_conf_thr", "Head Confidence", 0.0, 1.0,
+            float(getattr(config, "det_head_conf_thr", 0.05)), True,
+            "Ngưỡng confidence cho head. Thường cao hơn body vì head khó detect hơn."
+        )
+        add_slider_row(
+            "det_vline_min_h", "Vertical Line Min Height", 0.0, 200.0,
+            float(getattr(config, "det_vline_min_h", 5.0)), True,
+            "Chiều cao tối thiểu của đường thẳng đứng trong detection để xác nhận."
+        )
+        
+        # === HEAD-BODY RELATIONSHIP ===
+        relation_section = ctk.CTkLabel(scrollable_detection, text="🤝 HEAD-BODY RELATIONSHIP", font=("Arial", 16, "bold"))
+        relation_section.pack(pady=(15, 5), anchor="w")
+        
+        add_slider_row(
+            "det_head_body_ratio", "Head/Body Size Ratio", 0.1, 1.0,
+            float(getattr(config, "det_head_body_ratio", 0.3)), True,
+            "Tỷ lệ kích thước head/body. 0.3 = head bằng 30% body. Dùng để validate head hợp lý."
+        )
+        add_slider_row(
+            "det_head_position_ratio", "Head Position in Body", 0.1, 0.8,
+            float(getattr(config, "det_head_position_ratio", 0.25)), True,
+            "Head phải nằm trong % đầu của body. 0.25 = head trong 25% trên của body."
+        )
+        
+        # === CLAHE ENHANCEMENT ===
+        clahe_section = ctk.CTkLabel(scrollable_detection, text="✨ CLAHE ENHANCEMENT", font=("Arial", 16, "bold"))
+        clahe_section.pack(pady=(15, 5), anchor="w")
+        
         # Checkbox Enable CLAHE
         self.var_enable_clahe = tk.BooleanVar(
             value=bool(getattr(config, "use_clahe", True))
         )
         cb = ctk.CTkCheckBox(
-            scrollable_detection,  # Use scrollable frame
-            text="Enable CLAHE",
+            scrollable_detection,
+            text="Enable CLAHE (Contrast Limited Adaptive Histogram Equalization)",
             variable=self.var_enable_clahe,
             command=self._on_enable_clahe_changed,
         )
         cb.pack(pady=6, anchor="w")
         self._checkbox_vars["use_clahe"] = self.var_enable_clahe
+        
+        add_slider_row(
+            "det_clahe_clip", "CLAHE Clip Limit", 1.0, 10.0,
+            float(getattr(config, "det_clahe_clip", 2.0)), True,
+            "Giới hạn clip cho CLAHE. Cao = tăng contrast mạnh, thấp = tăng contrast nhẹ."
+        )
+        add_slider_row(
+            "det_clahe_grid", "CLAHE Grid Size", 2.0, 64.0,
+            float(getattr(config, "det_clahe_grid", 8.0)), True,
+            "Kích thước lưới CLAHE. Nhỏ = xử lý chi tiết, lớn = xử lý tổng thể."
+        )
 
     # draggable title bar handlers
     def start_move(self, event):
@@ -881,31 +1150,86 @@ class ViewerApp(ctk.CTk):
             "enabletb": getattr(config, "enabletb", False),
             "selected_mouse_button": getattr(config, "selected_mouse_button", 3),
             "selected_tb_btn": getattr(config, "selected_tb_btn", 3),
-            # Detection HSV
-            "det_h_min": getattr(config, "det_h_min", 30),
-            "det_h_max": getattr(config, "det_h_max", 160),
-            "det_s_min": getattr(config, "det_s_min", 125),
-            "det_s_max": getattr(config, "det_s_max", 255),
-            "det_v_min": getattr(config, "det_v_min", 150),
-            "det_v_max": getattr(config, "det_v_max", 255),
-            # Morphology
-            "det_close_kw": getattr(config, "det_close_kw", 15),
-            "det_close_kh": getattr(config, "det_close_kh", 30),
-            "det_dilate_k": getattr(config, "det_dilate_k", 15),
-            "det_dilate_iter": getattr(config, "det_dilate_iter", 1),
-            # Contour filters
-            "det_min_area": getattr(config, "det_min_area", 80),
-            "det_max_area": getattr(config, "det_max_area", 200000),
-            "det_ar_min": getattr(config, "det_ar_min", 0.2),
-            "det_ar_max": getattr(config, "det_ar_max", 5.0),
-            # Merge / Confidence / Vertical line
-            "det_merge_dist": getattr(config, "det_merge_dist", 250),
+            
+            # Display options
+            "show_body_box": getattr(config, "show_body_box", True),
+            "show_head_box": getattr(config, "show_head_box", True),
+            
+            # Body Detection HSV
+            "det_body_h_min": getattr(config, "det_body_h_min", 30.0),
+            "det_body_h_max": getattr(config, "det_body_h_max", 160.0),
+            "det_body_s_min": getattr(config, "det_body_s_min", 125.0),
+            "det_body_s_max": getattr(config, "det_body_s_max", 255.0),
+            "det_body_v_min": getattr(config, "det_body_v_min", 150.0),
+            "det_body_v_max": getattr(config, "det_body_v_max", 255.0),
+            
+            # Head Detection HSV
+            "det_head_h_min": getattr(config, "det_head_h_min", 25.0),
+            "det_head_h_max": getattr(config, "det_head_h_max", 170.0),
+            "det_head_s_min": getattr(config, "det_head_s_min", 100.0),
+            "det_head_s_max": getattr(config, "det_head_s_max", 255.0),
+            "det_head_v_min": getattr(config, "det_head_v_min", 120.0),
+            "det_head_v_max": getattr(config, "det_head_v_max", 255.0),
+            
+            # Pre-processing
+            "det_blur_kernel": getattr(config, "det_blur_kernel", 3.0),
+            "det_blur_sigma": getattr(config, "det_blur_sigma", 1.0),
+            "det_gamma": getattr(config, "det_gamma", 1.0),
+            "det_brightness": getattr(config, "det_brightness", 0.0),
+            "det_contrast": getattr(config, "det_contrast", 1.0),
+            
+            # Body Morphology
+            "det_body_close_kw": getattr(config, "det_body_close_kw", 15.0),
+            "det_body_close_kh": getattr(config, "det_body_close_kh", 30.0),
+            "det_body_dilate_k": getattr(config, "det_body_dilate_k", 15.0),
+            "det_body_dilate_iter": getattr(config, "det_body_dilate_iter", 1.0),
+            "det_body_erode_k": getattr(config, "det_body_erode_k", 3.0),
+            "det_body_erode_iter": getattr(config, "det_body_erode_iter", 1.0),
+            
+            # Head Morphology
+            "det_head_close_kw": getattr(config, "det_head_close_kw", 8.0),
+            "det_head_close_kh": getattr(config, "det_head_close_kh", 12.0),
+            "det_head_dilate_k": getattr(config, "det_head_dilate_k", 5.0),
+            "det_head_dilate_iter": getattr(config, "det_head_dilate_iter", 1.0),
+            "det_head_erode_k": getattr(config, "det_head_erode_k", 2.0),
+            "det_head_erode_iter": getattr(config, "det_head_erode_iter", 1.0),
+            
+            # Body Contour Filters
+            "det_body_min_area": getattr(config, "det_body_min_area", 500.0),
+            "det_body_max_area": getattr(config, "det_body_max_area", 50000.0),
+            "det_body_ar_min": getattr(config, "det_body_ar_min", 0.3),
+            "det_body_ar_max": getattr(config, "det_body_ar_max", 3.0),
+            "det_body_solidity_min": getattr(config, "det_body_solidity_min", 0.5),
+            "det_body_extent_min": getattr(config, "det_body_extent_min", 0.3),
+            
+            # Head Contour Filters
+            "det_head_min_area": getattr(config, "det_head_min_area", 50.0),
+            "det_head_max_area": getattr(config, "det_head_max_area", 2000.0),
+            "det_head_ar_min": getattr(config, "det_head_ar_min", 0.6),
+            "det_head_ar_max": getattr(config, "det_head_ar_max", 1.8),
+            "det_head_solidity_min": getattr(config, "det_head_solidity_min", 0.7),
+            "det_head_extent_min": getattr(config, "det_head_extent_min", 0.5),
+            
+            # Advanced Filters
+            "det_edge_threshold1": getattr(config, "det_edge_threshold1", 50.0),
+            "det_edge_threshold2": getattr(config, "det_edge_threshold2", 150.0),
+            "det_contour_epsilon": getattr(config, "det_contour_epsilon", 0.02),
+            "det_min_contour_points": getattr(config, "det_min_contour_points", 5.0),
+            
+            # Merge & Validation
+            "det_merge_dist": getattr(config, "det_merge_dist", 250.0),
             "det_iou_thr": getattr(config, "det_iou_thr", 0.1),
-            "det_conf_thr": getattr(config, "det_conf_thr", 0.02),
-            "det_vline_min_h": getattr(config, "det_vline_min_h", 5),
+            "det_body_conf_thr": getattr(config, "det_body_conf_thr", 0.02),
+            "det_head_conf_thr": getattr(config, "det_head_conf_thr", 0.05),
+            "det_vline_min_h": getattr(config, "det_vline_min_h", 5.0),
+            
+            # Head-Body Relationship
+            "det_head_body_ratio": getattr(config, "det_head_body_ratio", 0.3),
+            "det_head_position_ratio": getattr(config, "det_head_position_ratio", 0.25),
+            
             # CLAHE
             "det_clahe_clip": getattr(config, "det_clahe_clip", 2.0),
-            "det_clahe_grid": getattr(config, "det_clahe_grid", 8),
+            "det_clahe_grid": getattr(config, "det_clahe_grid", 8.0),
             "use_clahe": getattr(config, "use_clahe", True),
         }
 
@@ -950,7 +1274,7 @@ class ViewerApp(ctk.CTk):
                         self._set_btn_option_value(k, v)
 
             # --- Recharger le modèle si nécessaire ---
-            from detection2 import reload_model
+            from detection import reload_model
 
             self.tracker.model, self.tracker.class_names = reload_model()
 
@@ -1232,19 +1556,24 @@ class ViewerApp(ctk.CTk):
         self.tb_button_option.pack(pady=5, fill="x")
         self._option_widgets["selected_tb_btn"] = self.tb_button_option
 
-    # Generic slider helper (parent-aware)
-    def _add_slider_with_label(
-        self, parent, text, min_val, max_val, init_val, command, is_float=False
+    # Enhanced slider helper with tooltip support
+    def _add_slider_with_label_and_tooltip(
+        self, parent, text, min_val, max_val, init_val, command, is_float=False, tooltip=""
     ):
         frame = ctk.CTkFrame(parent)
         frame.pack(padx=12, pady=6, fill="x")
 
+        # Label with tooltip support
         label = ctk.CTkLabel(
             frame, text=f"{text}: {init_val:.2f}" if is_float else f"{text}: {init_val}"
         )
         label.pack(side="left")
+        
+        # Add tooltip if provided
+        if tooltip:
+            self._add_tooltip(label, tooltip)
 
-        steps = 100 if is_float else max(1, int(max_val - min_val))
+        steps = 1000 if is_float else max(1, int(max_val - min_val))
         slider = ctk.CTkSlider(
             frame,
             from_=min_val,
@@ -1254,7 +1583,65 @@ class ViewerApp(ctk.CTk):
         )
         slider.set(init_val)
         slider.pack(side="right", fill="x", expand=True)
+        
+        if tooltip:
+            self._add_tooltip(slider, tooltip)
+            
         return slider, label
+    
+    # Legacy method for backward compatibility
+    def _add_slider_with_label(
+        self, parent, text, min_val, max_val, init_val, command, is_float=False
+    ):
+        return self._add_slider_with_label_and_tooltip(
+            parent, text, min_val, max_val, init_val, command, is_float, ""
+        )
+    
+    def _add_tooltip(self, widget, text):
+        """Add tooltip to widget"""
+        def on_enter(event):
+            try:
+                tooltip_window = tk.Toplevel(self)
+                tooltip_window.wm_overrideredirect(True)
+                tooltip_window.configure(bg="#2b2b2b")
+                
+                # Position tooltip near mouse
+                x = widget.winfo_rootx() + 25
+                y = widget.winfo_rooty() + 25
+                tooltip_window.geometry(f"+{x}+{y}")
+                
+                # Create tooltip label with text wrapping
+                tooltip_label = tk.Label(
+                    tooltip_window, 
+                    text=text,
+                    bg="#2b2b2b",
+                    fg="white",
+                    font=("Arial", 9),
+                    wraplength=300,
+                    justify="left",
+                    padx=8,
+                    pady=4
+                )
+                tooltip_label.pack()
+                
+                # Store tooltip reference
+                widget.tooltip_window = tooltip_window
+            except Exception:
+                pass  # Ignore tooltip errors
+            
+        def on_leave(event):
+            try:
+                if hasattr(widget, 'tooltip_window'):
+                    widget.tooltip_window.destroy()
+                    del widget.tooltip_window
+            except Exception:
+                pass  # Ignore tooltip errors
+                
+        try:
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+        except Exception:
+            pass  # Ignore binding errors
 
     def _slider_callback(self, value, label, text, command, is_float):
         val = float(value) if is_float else int(round(value))
@@ -1301,17 +1688,14 @@ class ViewerApp(ctk.CTk):
         v = float(val) if is_float else int(round(val))
         setattr(config, key, v)
         # Nếu cần reload model (HSV) khi thay đổi range:
-        if key in {
-            "det_h_min",
-            "det_h_max",
-            "det_s_min",
-            "det_s_max",
-            "det_v_min",
-            "det_v_max",
-        }:
+        # Reload model when HSV parameters change
+        hsv_keys = {
+            "det_body_h_min", "det_body_h_max", "det_body_s_min", "det_body_s_max", "det_body_v_min", "det_body_v_max",
+            "det_head_h_min", "det_head_h_max", "det_head_s_min", "det_head_s_max", "det_head_v_min", "det_head_v_max"
+        }
+        if key in hsv_keys:
             try:
-                from detection2 import reload_model
-
+                from detection import reload_model
                 self.tracker.model, self.tracker.class_names = reload_model()
             except Exception:
                 pass
@@ -1333,6 +1717,12 @@ class ViewerApp(ctk.CTk):
 
     def _on_enabletb_changed(self):
         config.enabletb = self.var_enabletb.get()
+        
+    def _on_show_body_changed(self):
+        config.show_body_box = self.var_show_body.get()
+        
+    def _on_show_head_changed(self):
+        config.show_head_box = self.var_show_head.get()
 
     def _on_source_selected(self, val):
         pass
