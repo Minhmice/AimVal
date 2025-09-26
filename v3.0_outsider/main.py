@@ -288,7 +288,6 @@ class AimTracker:
         )
 
     def _aim_and_move(self, targets, frame, img):
-
         aim_enabled = getattr(config, "enableaim", False)
         selected_btn = getattr(config, "selected_mouse_button", None)
 
@@ -322,9 +321,7 @@ class AimTracker:
 
         mode = getattr(config, "mode", "Normal")
         if mode == "Normal":
-
             try:
-
                 # --- AIMBOT ---
                 if (
                     aim_enabled
@@ -335,7 +332,6 @@ class AimTracker:
                     if distance_to_center < float(
                         getattr(config, "normalsmoothfov", self.normalsmoothfov)
                     ):
-
                         ndx *= float(
                             getattr(config, "normal_x_speed", self.normal_x_speed)
                         ) / max(
@@ -367,13 +363,13 @@ class AimTracker:
                     and is_button_pressed(getattr(config, "selected_tb_btn", None))
                     or is_button_pressed(getattr(config, "selected_2_tb", None))
                 ):
-
                     # Centre de l'écran
                     cx0, cy0 = int(frame.xres // 2), int(frame.yres // 2)
                     ROI_SIZE = 5  # petit carré autour du centre
                     x1, y1 = max(cx0 - ROI_SIZE, 0), max(cy0 - ROI_SIZE, 0)
-                    x2, y2 = min(cx0 + ROI_SIZE, img.shape[1]), min(
-                        cy0 + ROI_SIZE, img.shape[0]
+                    x2, y2 = (
+                        min(cx0 + ROI_SIZE, img.shape[1]),
+                        min(cy0 + ROI_SIZE, img.shape[0]),
                     )
                     roi = img[y1:y2, x1:x2]
 
@@ -439,9 +435,7 @@ class ViewerApp(ctk.CTk):
         self.geometry("400x700")
 
         # Dicos pour MAJ UI <-> config
-        self._slider_widgets = (
-            {}
-        )  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
+        self._slider_widgets = {}  # key -> {"slider": widget, "label": widget, "min":..., "max":...}
         self._checkbox_vars = {}  # key -> tk.BooleanVar
         self._option_widgets = {}  # key -> CTkOptionMenu
 
@@ -528,9 +522,9 @@ class ViewerApp(ctk.CTk):
         w["slider"].set(v)
         # Rafraîchir label
         txt = (
-            f"{key.replace('_',' ').title()}: {v:.2f}"
+            f"{key.replace('_', ' ').title()}: {v:.2f}"
             if is_float
-            else f"{key.replace('_',' ').title()}: {int(v)}"
+            else f"{key.replace('_', ' ').title()}: {int(v)}"
         )
         # On garde le libellé humain (X Speed etc.) si déjà présent
         current = w["label"].cget("text")
@@ -641,7 +635,6 @@ class ViewerApp(ctk.CTk):
             # --- Mettre à jour les OptionMenu ---
             for k, v in data.items():
                 if k == "selected_mouse_button" or k == "selected_tb_btn":
-
                     if k in self._option_widgets:
                         print(k, v)
 
@@ -1027,9 +1020,13 @@ class ViewerApp(ctk.CTk):
             ok = self.udp_source.start()
             self.connected = bool(ok)
             if ok:
-                self.status_label.configure(text=f"UDP listening on :{port}", text_color="green")
+                self.status_label.configure(
+                    text=f"UDP listening on :{port}", text_color="green"
+                )
             else:
-                self.status_label.configure(text="Failed to start UDP", text_color="red")
+                self.status_label.configure(
+                    text="Failed to start UDP", text_color="red"
+                )
         except Exception as e:
             self.connected = False
             self.status_label.configure(text=f"UDP error: {e}", text_color="red")
