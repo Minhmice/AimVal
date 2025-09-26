@@ -7,7 +7,15 @@ class Config:
         self.offsetX = -2
         self.offsetY = 3
 
-        self.color = "purple"
+        # color removed (fixed to purple in detection)
+
+        # --- Debug / Viewer ---
+        self.debug_show = False  # gate cv2.imshow windows for smoothness
+        self.viewer_port = 8080
+        self.viewer_rcvbuf_mb = 256
+        self.viewer_scale = 1.0
+        self.viewer_max_display_fps = 240.0
+        self.viewer_metrics_hz = 120.0
 
         # --- Mouse / MAKCU ---
         self.selected_mouse_button = 1

@@ -23,22 +23,11 @@ def load_model(model_path=None):
     config.model_load_error = ""
 
     try:
-        print("Loading HSV parameters...")
-        yellow = [30, 125, 150, 30, 255, 255]
+        print("Loading HSV parameters (purple only)...")
         purple = [144, 106, 172, 160, 255, 255]
-
-        if config.color == "yellow":
-            HSV_MIN = np.array([yellow[0], yellow[1], yellow[2]], dtype=np.uint8)
-            HSV_MAX = np.array([yellow[3], yellow[4], yellow[5]], dtype=np.uint8)
-            print("Loaded HSV for yellow")
-
-        elif config.color == "purple":
-            HSV_MIN = np.array([purple[0], purple[1], purple[2]], dtype=np.uint8)
-            HSV_MAX = np.array([purple[3], purple[4], purple[5]], dtype=np.uint8)
-            print("Loaded HSV for purple")
-
-        else:
-            raise ValueError(f"Unknown color {config.color}")
+        HSV_MIN = np.array([purple[0], purple[1], purple[2]], dtype=np.uint8)
+        HSV_MAX = np.array([purple[3], purple[4], purple[5]], dtype=np.uint8)
+        print("Loaded HSV for purple")
 
         _model = (HSV_MIN, HSV_MAX)
         _class_names = {"color": "Target Color"}
