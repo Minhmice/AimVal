@@ -17,8 +17,9 @@ class TriggerBot:
     def __init__(self, detection_engine):
         self.detection_engine = detection_engine  # DetectionEngine để lấy kết quả detection
         self.controller = Mouse()  # Điều khiển chuột
-        self.last_click_time = 0.0  # Thời điểm click cuối cùng
-        self.tbdelay = float(getattr(config, "tbdelay", 0.08))  # Độ trễ giữa các lần click
+        self.last_click_time = 0.0  # Thời điểm click cuối cùng (seconds)
+        self.last_click_time_ms = 0.0  # Thời điểm click cuối cùng (milliseconds)
+        self.tbdelay = float(getattr(config, "tbdelay", 0.08))  # Độ trễ giữa các lần click (seconds)
         self.fire_rate_ms = float(getattr(config, "trigger_fire_rate_ms", 100))  # Tốc độ bắn (ms)
         self.enabled = False  # Trạng thái bật/tắt triggerbot
 
@@ -48,11 +49,12 @@ class TriggerBot:
                 now = time.time()
                 now_ms = now * 1000  # Chuyển sang millisecond
                 
-                # Kiểm tra cả tbdelay (giây) và fire_rate_ms (millisecond)
+                # Kiểm tra cả tbdelay (giây) và fire_rate_ms (millisecond) - FIXED
                 if (now - self.last_click_time >= self.tbdelay and 
-                    now_ms - self.last_click_time * 1000 >= self.fire_rate_ms):
+                    now_ms - self.last_click_time_ms >= self.fire_rate_ms):
                     self.controller.click()  # Thực hiện click
-                    self.last_click_time = now  # Cập nhật thời gian click
+                    self.last_click_time = now  # Cập nhật thời gian click (seconds)
+                    self.last_click_time_ms = now_ms  # Cập nhật thời gian click (milliseconds)
 
         except Exception as e:
             print(f"[Triggerbot Error] {e}")

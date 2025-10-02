@@ -49,23 +49,23 @@ class AimTracker:
         
         # ========== CÁC THAM SỐ CẤU HÌNH (load từ config với giá trị mặc định) ==========
         # Tham số tốc độ và độ mượt mà
-        self.normal_x_speed = float(getattr(config, "normal_x_speed", 0.5))  # Tốc độ di chuyển X chuột
-        self.normal_y_speed = float(getattr(config, "normal_y_speed", 0.5))  # Tốc độ di chuyển Y chuột
-        self.normalsmooth = float(getattr(config, "normalsmooth", 10))       # Độ mượt mà khi gần mục tiêu
-        self.normalsmoothfov = float(getattr(config, "normalsmoothfov", 10)) # FOV áp dụng smoothing
+        self.normal_x_speed = int(getattr(config, "normal_x_speed", 0.5))    # Tốc độ di chuyển X chuột
+        self.normal_y_speed = int(getattr(config, "normal_y_speed", 0.5))    # Tốc độ di chuyển Y chuột
+        self.normalsmooth = int(getattr(config, "normalsmooth", 10))         # Độ mượt mà khi gần mục tiêu
+        self.normalsmoothfov = int(getattr(config, "normalsmoothfov", 10))   # FOV áp dụng smoothing
         
         # Tham số chuột và độ nhạy
-        self.mouse_dpi = float(getattr(config, "mouse_dpi", 800))            # DPI chuột
-        self.in_game_sens = float(getattr(config, "in_game_sens", 7))        # Độ nhạy trong game
-        self.max_speed = float(getattr(config, "max_speed", 1000.0))         # Tốc độ tối đa (giới hạn)
+        self.mouse_dpi = int(getattr(config, "mouse_dpi", 800))              # DPI chuột
+        self.in_game_sens = int(getattr(config, "in_game_sens", 7))          # Độ nhạy trong game
+        self.max_speed = int(getattr(config, "max_speed", 1000))             # Tốc độ tối đa (giới hạn)
         
         # Tham số FOV (Field of View)
-        self.fovsize = float(getattr(config, "fovsize", 300))                # Kích thước FOV aimbot (pixel)
-        self.tbfovsize = float(getattr(config, "tbfovsize", 70))             # Kích thước FOV triggerbot
+        self.fovsize = int(getattr(config, "fovsize", 300))                  # Kích thước FOV aimbot (pixel)
+        self.tbfovsize = int(getattr(config, "tbfovsize", 70))               # Kích thước FOV triggerbot
         
         # Tham số triggerbot
-        self.tbdelay = float(getattr(config, "tbdelay", 0.08))               # Độ trễ giữa các lần bắn (giây)
-        self.last_tb_click_time = 0.0                                        # Thời điểm click cuối cùng
+        self.tbdelay = int(getattr(config, "tbdelay", 0.08))                 # Độ trễ giữa các lần bắn (giây)
+        self.last_tb_click_time = 0                                          # Thời điểm click cuối cùng
         self.color = getattr(config, "color", "purple")                     # Màu sắc để triggerbot phát hiện
         
         # Tham số chế độ và phím
@@ -131,7 +131,7 @@ class AimTracker:
         """
         clipped_dx = np.clip(dx, -abs(self.max_speed), abs(self.max_speed))  # Giới hạn X
         clipped_dy = np.clip(dy, -abs(self.max_speed), abs(self.max_speed))  # Giới hạn Y
-        return float(clipped_dx), float(clipped_dy)  # Trả về giá trị đã giới hạn
+        return int(clipped_dx), int(clipped_dy)  # Trả về giá trị đã giới hạn
 
     def _track_loop(self):
         """
@@ -139,7 +139,7 @@ class AimTracker:
         Chạy liên tục ở FPS cố định để xử lý từng frame
         Đảm bảo aimbot hoạt động mượt mà và ổn định
         """
-        period = 1.0 / float(self._target_fps)  # Thời gian mỗi frame (1/80 = 0.0125 giây)
+        period = 1.0 / int(self._target_fps)  # Thời gian mỗi frame (1/80 = 0.0125 giây)
         while not self._stop_event.is_set():    # Chạy cho đến khi được báo dừng
             start = time.time()                 # Ghi nhận thời điểm bắt đầu xử lý
             try:
@@ -248,7 +248,7 @@ class AimTracker:
             cx, cy, _ = best_target
             distance_to_center = math.hypot(cx - center_x, cy - center_y)
             # Kiểm tra mục tiêu có trong FOV không
-            if distance_to_center > float(getattr(config, "fovsize", self.fovsize)):
+            if distance_to_center > int(getattr(config, "fovsize", self.fovsize)):
                 return  # Mục tiêu ngoài FOV → bỏ qua
 
         # ========== TÍNH TOÁN KHOẢNG CÁCH CẦN DI CHUYỂN ==========
@@ -256,8 +256,8 @@ class AimTracker:
         dy = cy - center_y  # Khoảng cách Y cần di chuyển (pixel)
 
         # ========== CHUYỂN ĐỔI PIXEL THÀNH COUNT CHUỘT ==========
-        sens = float(getattr(config, "in_game_sens", self.in_game_sens))  # Độ nhạy trong game
-        dpi = float(getattr(config, "mouse_dpi", self.mouse_dpi))         # DPI chuột
+        sens = int(getattr(config, "in_game_sens", self.in_game_sens))    # Độ nhạy trong game
+        dpi = int(getattr(config, "mouse_dpi", self.mouse_dpi))           # DPI chuột
 
         # Công thức chuyển đổi từ pixel sang count chuột
         cm_per_rev_base = 54.54  # Cm chuột cần để quay 360 độ (giá trị chuẩn)
@@ -276,18 +276,18 @@ class AimTracker:
                 # ========== CHẾ ĐỘ NORMAL - AIMBOT MƯỢT MÀ ==========
                 # Thực hiện aimbot nếu được bật, có phím được nhấn và có mục tiêu
                 if aim_enabled and aim_pressed and targets:
-                    if distance_to_center < float(getattr(config, "normalsmoothfov", self.normalsmoothfov)):
+                    if distance_to_center < int(getattr(config, "normalsmoothfov", self.normalsmoothfov)):
                         # Gần mục tiêu → áp dụng smoothing để mượt mà hơn
-                        ndx *= float(getattr(config, "normal_x_speed", self.normal_x_speed)) / max(
-                            float(getattr(config, "normalsmooth", self.normalsmooth)), 0.01
+                        ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed)) / max(
+                            int(getattr(config, "normalsmooth", self.normalsmooth)), 1
                         )
-                        ndy *= float(getattr(config, "normal_y_speed", self.normal_y_speed)) / max(
-                            float(getattr(config, "normalsmooth", self.normalsmooth)), 0.01
+                        ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed)) / max(
+                            int(getattr(config, "normalsmooth", self.normalsmooth)), 1
                         )
                     else:
                         # Xa mục tiêu → không smoothing, di chuyển nhanh
-                        ndx *= float(getattr(config, "normal_x_speed", self.normal_x_speed))
-                        ndy *= float(getattr(config, "normal_y_speed", self.normal_y_speed))
+                        ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed))
+                        ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed))
                     
                     # Giới hạn tốc độ và thêm vào hàng đợi
                     ddx, ddy = self._clip_movement(ndx, ndy)
@@ -306,7 +306,7 @@ class AimTracker:
                         # Có phát hiện màu sắc ở trung tâm → tự động bắn
                         now = time.time()
                         # Kiểm tra delay để tránh bắn quá nhanh
-                        if now - self.last_tb_click_time >= float(getattr(config, "tbdelay", self.tbdelay)):
+                        if now - self.last_tb_click_time >= int(getattr(config, "tbdelay", self.tbdelay)):
                             self.controller.click()  # Bắn
                             self.last_tb_click_time = now  # Cập nhật thời gian bắn cuối
 
@@ -326,4 +326,3 @@ class AimTracker:
                     args=(self.controller, dx_raw, dy_raw),
                     daemon=True,
                 ).start()
-

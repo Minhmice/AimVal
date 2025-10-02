@@ -39,13 +39,12 @@ class Config:
 
         # --- Anti-Recoil Settings ---
         self.anti_recoil_enabled = False
-        self.anti_recoil_key = 3  # Side Mouse 4 (1 phím duy nhất)
-        self.anti_recoil_require_aim_active = True  # Bắt buộc aim đang hoạt động
+        self.anti_recoil_key_1 = 3  # Side Mouse 4 (phím 1)
+        self.anti_recoil_key_2 = 4  # Side Mouse 5 (phím 2)
         self.anti_recoil_x = 0
         self.anti_recoil_y = 0
         self.anti_recoil_fire_rate = 100
         self.anti_recoil_hold_time = 0
-        self.anti_recoil_only_triggering = True
         self.anti_recoil_scale_ads = 1.0
         self.anti_recoil_smooth_segments = 2
         self.anti_recoil_smooth_scale = 0.25

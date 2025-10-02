@@ -360,14 +360,13 @@ class ViewerApp(ctk.CTk):
             "anti_recoil_y": getattr(config, "anti_recoil_y", 0),            # Giật Y
             "anti_recoil_fire_rate": getattr(config, "anti_recoil_fire_rate", 100),  # Tốc độ bắn
             "anti_recoil_hold_time": getattr(config, "anti_recoil_hold_time", 0),    # Thời gian giữ
-            "anti_recoil_only_triggering": getattr(config, "anti_recoil_only_triggering", True),  # Chỉ khi bắn
             "anti_recoil_scale_ads": getattr(config, "anti_recoil_scale_ads", 1.0),  # Tỷ lệ ADS
             "anti_recoil_smooth_segments": getattr(config, "anti_recoil_smooth_segments", 2),  # Đoạn mượt
             "anti_recoil_smooth_scale": getattr(config, "anti_recoil_smooth_scale", 0.25),  # Tỷ lệ mượt
             "anti_recoil_jitter_x": getattr(config, "anti_recoil_jitter_x", 0),  # Jitter X
             "anti_recoil_jitter_y": getattr(config, "anti_recoil_jitter_y", 0),  # Jitter Y
-            "anti_recoil_ads_key": getattr(config, "anti_recoil_ads_key", 1),  # Phím ADS
-            "anti_recoil_trigger_key": getattr(config, "anti_recoil_trigger_key", 0),  # Phím bắn
+            "anti_recoil_key_1": getattr(config, "anti_recoil_key_1", 3),  # Phím anti-recoil 1
+            "anti_recoil_key_2": getattr(config, "anti_recoil_key_2", 4),  # Phím anti-recoil 2
         }
 
     def _apply_settings(self, data, config_name=None):
@@ -412,8 +411,8 @@ class ViewerApp(ctk.CTk):
                     "aim_button_1",           # Phím aim 1
                     "aim_button_2",           # Phím aim 2
                     "trigger_button",         # Phím triggerbot
-                    "anti_recoil_ads_key",    # Phím ADS anti-recoil
-                    "anti_recoil_trigger_key", # Phím bắn anti-recoil
+                    "anti_recoil_key_1",    # Phím anti-recoil 1
+                    "anti_recoil_key_2",    # Phím anti-recoil 2
                 ]:
                     if k in self._option_widgets:
                         v = BUTTONS[v]  # Chuyển đổi mã nút thành tên hiển thị
@@ -427,10 +426,14 @@ class ViewerApp(ctk.CTk):
                 self.mouse_dpi_entry.delete(0, tk.END)  # Xóa nội dung cũ
                 self.mouse_dpi_entry.insert(0, str(data["mouse_dpi"]))  # Chèn giá trị mới
 
-            # ========== CẬP NHẬT ANTI-RECOIL KEY ==========
-            if "anti_recoil_key" in data:
-                key_name = BUTTONS.get(data["anti_recoil_key"], "Side Mouse 4 Button")
-                self.ar_key_option.set(key_name)
+            # ========== CẬP NHẬT ANTI-RECOIL KEYS ==========
+            if "anti_recoil_key_1" in data:
+                key_name = BUTTONS.get(data["anti_recoil_key_1"], "Side Mouse 4 Button")
+                self.ar_key_1_option.set(key_name)
+            
+            if "anti_recoil_key_2" in data:
+                key_name = BUTTONS.get(data["anti_recoil_key_2"], "Side Mouse 5 Button")
+                self.ar_key_2_option.set(key_name)
 
             # ========== RELOAD MÔ HÌNH AI ==========
             from detection import reload_model
@@ -757,27 +760,7 @@ class ViewerApp(ctk.CTk):
         ).pack(pady=6, anchor="w")
         self._checkbox_vars["anti_recoil_enabled"] = self.var_anti_recoil_enabled
 
-        # Anti-Recoil Key
-        ctk.CTkLabel(self.tab_ar, text="Anti-Recoil Key:").pack(pady=5, anchor="w")
-        self.ar_key_option = ctk.CTkOptionMenu(
-            self.tab_ar,
-            values=list(BUTTONS.values()),
-            command=self._on_ar_key_changed
-        )
-        self.ar_key_option.pack(pady=5, fill="x")
-        self._option_widgets["anti_recoil_key"] = self.ar_key_option
 
-        # Require Aim Active
-        self.var_anti_recoil_require_aim = tk.BooleanVar(
-            value=getattr(config, "anti_recoil_require_aim_active", True)
-        )
-        ctk.CTkCheckBox(
-            self.tab_ar,
-            text="Require Aim Active to Start",
-            variable=self.var_anti_recoil_require_aim,
-            command=self._on_ar_require_aim_changed,
-        ).pack(pady=6, anchor="w")
-        self._checkbox_vars["anti_recoil_require_aim_active"] = self.var_anti_recoil_require_aim
 
         # X Recoil
         s, l = self._add_slider_with_label(
@@ -863,39 +846,27 @@ class ViewerApp(ctk.CTk):
         )
         self._register_slider("anti_recoil_jitter_y", s, l, 0, 20, True)
 
-        # Only when triggering
-        self.var_anti_recoil_only_triggering = tk.BooleanVar(
-            value=getattr(config, "anti_recoil_only_triggering", True)
-        )
-        ctk.CTkCheckBox(
-            self.tab_ar,
-            text="Only when triggering",
-            variable=self.var_anti_recoil_only_triggering,
-            command=self._on_anti_recoil_only_triggering_changed,
-        ).pack(pady=6, anchor="w")
-        self._checkbox_vars["anti_recoil_only_triggering"] = (
-            self.var_anti_recoil_only_triggering
-        )
-
-        # ADS Key
-        ctk.CTkLabel(self.tab_ar, text="ADS Key").pack(pady=5, anchor="w")
-        self.ar_ads_key_option = ctk.CTkOptionMenu(
+                # Anti-Recoil Keys (choose two)
+        ctk.CTkLabel(self.tab_ar, text="Anti-Recoil Keys (choose two):").pack(pady=5, anchor="w")
+        
+        # Anti-Recoil Key 1
+        self.ar_key_1_option = ctk.CTkOptionMenu(
             self.tab_ar,
             values=list(BUTTONS.values()),
-            command=self._on_ar_ads_key_selected,
+            command=self._on_ar_key_1_changed
         )
-        self.ar_ads_key_option.pack(pady=5, fill="x")
-        self._option_widgets["anti_recoil_ads_key"] = self.ar_ads_key_option
+        self.ar_key_1_option.pack(pady=2, fill="x")
+        self._option_widgets["anti_recoil_key_1"] = self.ar_key_1_option
 
-        # Trigger Key
-        ctk.CTkLabel(self.tab_ar, text="Trigger Key").pack(pady=5, anchor="w")
-        self.ar_trigger_key_option = ctk.CTkOptionMenu(
+        # Anti-Recoil Key 2
+        self.ar_key_2_option = ctk.CTkOptionMenu(
             self.tab_ar,
             values=list(BUTTONS.values()),
-            command=self._on_ar_trigger_key_selected,
+            command=self._on_ar_key_2_changed
         )
-        self.ar_trigger_key_option.pack(pady=5, fill="x")
-        self._option_widgets["anti_recoil_trigger_key"] = self.ar_trigger_key_option
+        self.ar_key_2_option.pack(pady=2, fill="x")
+        self._option_widgets["anti_recoil_key_2"] = self.ar_key_2_option
+
 
     # Generic slider helper (parent-aware)
     def _add_slider_with_label(
@@ -1006,15 +977,16 @@ class ViewerApp(ctk.CTk):
         config.anti_recoil_enabled = self.var_anti_recoil_enabled.get()
         self.anti_recoil.update_config()
 
-    def _on_ar_key_changed(self, choice):
-        """Callback khi thay đổi phím anti-recoil"""
+    def _on_ar_key_1_changed(self, choice):
+        """Callback khi thay đổi phím anti-recoil 1"""
         key_code = next((k for k, v in BUTTONS.items() if v == choice), 3)
-        config.anti_recoil_key = key_code
+        config.anti_recoil_key_1 = key_code
         self.anti_recoil.update_config()
 
-    def _on_ar_require_aim_changed(self):
-        """Callback khi thay đổi yêu cầu aim active"""
-        config.anti_recoil_require_aim_active = self.var_anti_recoil_require_aim.get()
+    def _on_ar_key_2_changed(self, choice):
+        """Callback khi thay đổi phím anti-recoil 2"""
+        key_code = next((k for k, v in BUTTONS.items() if v == choice), 4)
+        config.anti_recoil_key_2 = key_code
         self.anti_recoil.update_config()
 
     def _on_anti_recoil_x_changed(self, val):
@@ -1045,27 +1017,7 @@ class ViewerApp(ctk.CTk):
         config.anti_recoil_jitter_y = val
         self.anti_recoil.random_jitter_y = val
 
-    def _on_anti_recoil_only_triggering_changed(self):
-        config.anti_recoil_only_triggering = self.var_anti_recoil_only_triggering.get()
-        self.anti_recoil.only_when_triggering = (
-            self.var_anti_recoil_only_triggering.get()
-        )
 
-    def _on_ar_ads_key_selected(self, val):
-        for key, name in BUTTONS.items():
-            if name == val:
-                config.anti_recoil_ads_key = key
-                self.anti_recoil.ads_key = key
-                break
-        self._log_config(f"Anti-recoil ADS key set to {val} ({key})")
-
-    def _on_ar_trigger_key_selected(self, val):
-        for key, name in BUTTONS.items():
-            if name == val:
-                config.anti_recoil_trigger_key = key
-                self.anti_recoil.trigger_key = key
-                break
-        self._log_config(f"Anti-recoil trigger key set to {val} ({key})")
 
     def _on_source_selected(self, val):
         pass

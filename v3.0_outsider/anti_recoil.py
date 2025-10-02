@@ -54,9 +54,9 @@ class AntiRecoil:
         self.random_jitter_x = getattr(config, "anti_recoil_jitter_x", 0)
         self.random_jitter_y = getattr(config, "anti_recoil_jitter_y", 0)
         
-        # Phím điều khiển (1 phím duy nhất)
-        self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)  # Side Mouse 4
-        self.require_aim_active = getattr(config, "anti_recoil_require_aim_active", True)  # Bắt buộc aim đang hoạt động
+        # Phím điều khiển (2 phím)
+        self.anti_recoil_key_1 = getattr(config, "anti_recoil_key_1", 3)  # Side Mouse 4
+        self.anti_recoil_key_2 = getattr(config, "anti_recoil_key_2", 4)  # Side Mouse 5
 
     def update_config(self):
         """Cập nhật cấu hình từ config"""
@@ -73,54 +73,59 @@ class AntiRecoil:
         self.random_jitter_y = getattr(config, "anti_recoil_jitter_y", 0)
         
         # Cập nhật phím mới
-        self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)
-        self.require_aim_active = getattr(config, "anti_recoil_require_aim_active", True)
+        self.anti_recoil_key_1 = getattr(config, "anti_recoil_key_1", 3)
+        self.anti_recoil_key_2 = getattr(config, "anti_recoil_key_2", 4)
 
-    def check_aim_active(self):
+    def check_anti_recoil_keys(self):
         """
-        KIỂM TRA AIM CÓ ĐANG HOẠT ĐỘNG KHÔNG
-        - Kiểm tra aim_button_1 hoặc aim_button_2 có được nhấn không
-        - Trả về True nếu aim đang hoạt động, False nếu không
+        KIỂM TRA CÓ PHÍM ANTI-RECOIL NÀO ĐƯỢC NHẤN KHÔNG
+        - Kiểm tra anti_recoil_key_1 hoặc anti_recoil_key_2 có được nhấn không
+        - Trả về True nếu có phím nào được nhấn, False nếu không
         """
         try:
             from mouse import is_button_pressed
-            aim_button_1 = getattr(config, "aim_button_1", 1)
-            aim_button_2 = getattr(config, "aim_button_2", 2)
             
-            # Kiểm tra có phím aim nào được nhấn không
-            return (is_button_pressed(aim_button_1) or is_button_pressed(aim_button_2))
+            # Kiểm tra có phím anti-recoil nào được nhấn không
+            return (is_button_pressed(self.anti_recoil_key_1) or is_button_pressed(self.anti_recoil_key_2))
         except Exception as e:
-            print(f"[Anti-Recoil Aim Check Error] {e}")
+            print(f"[Anti-Recoil Key Check Error] {e}")
             return False
 
     def tick(self, detection_engine=None):
         """
         HÀM XỬ LÝ ANTI-RECOIL CHÍNH (CẬP NHẬT)
-        - Chỉ cần 1 phím để điều khiển
-        - Kiểm tra aim có đang hoạt động để bắt đầu
+        - Sử dụng 2 phím để điều khiển
+        - Kiểm tra hold time trước khi kích hoạt
         - Tiếp tục chạy cho đến khi thả phím
         """
         if not self.enabled:
             return
 
         try:
-            # Kiểm tra phím anti-recoil
-            key_pressed = is_button_pressed(self.anti_recoil_key)
+            # Kiểm tra có phím anti-recoil nào được nhấn không
+            key_pressed = self.check_anti_recoil_keys()
             
             if key_pressed and not self.state.is_anti_recoil_active:
-                # Bắt đầu: Kiểm tra aim có đang hoạt động không
-                if self.require_aim_active:
-                    if not self.check_aim_active():
-                        return  # Aim không hoạt động → không bắt đầu
+                # Bắt đầu: Kiểm tra hold time
+                if self.hold_time_ms > 0:
+                    # Cần hold đủ thời gian trước khi kích hoạt
+                    if not hasattr(self.state, 'hold_start_time'):
+                        self.state.hold_start_time = time.time() * 1000  # Bắt đầu đếm hold time
+                    else:
+                        held_time = (time.time() * 1000) - self.state.hold_start_time
+                        if held_time < self.hold_time_ms:
+                            return  # Chưa đủ thời gian hold
                 
                 self.state.is_anti_recoil_active = True
                 self.state.initial_target_detected = True
-                print("[Anti-Recoil] Started - Aim is active")
+                print("[Anti-Recoil] Started - Key pressed")
             
             elif not key_pressed and self.state.is_anti_recoil_active:
                 # Dừng: Thả phím
                 self.state.is_anti_recoil_active = False
                 self.state.initial_target_detected = False
+                if hasattr(self.state, 'hold_start_time'):
+                    delattr(self.state, 'hold_start_time')  # Reset hold time
                 print("[Anti-Recoil] Stopped - Key released")
             
             # Chỉ chạy anti-recoil khi đang active
