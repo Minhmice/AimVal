@@ -12,12 +12,17 @@ class AntiRecoilState:
     LỚP LƯU TRỮ TRẠNG THÁI ANTI-RECOIL
     - Theo dõi thời gian pull cuối cùng
     - Quản lý trạng thái kích hoạt anti-recoil
+    - Lưu trữ vị trí chuột để tự động trở về
     """
     def __init__(self):
         self.last_pull_ms = 0  # Thời điểm pull cuối cùng (millisecond)
         self.is_ads_held = False  # Trạng thái giữ ADS
         self.ads_start_time = 0  # Thời điểm bắt đầu giữ ADS
         self.is_triggering = False  # Trạng thái đang bắn
+        self.trigger_start_time = 0  # Thời điểm bắt đầu bắn
+        self.total_recoil_x = 0  # Tổng recoil X đã áp dụng
+        self.total_recoil_y = 0  # Tổng recoil Y đã áp dụng
+        self.was_triggering = False  # Trạng thái bắn trước đó
 
 
 class AntiRecoil:
@@ -104,7 +109,19 @@ class AntiRecoil:
                 self.state.ads_start_time = 0
 
             # Kiểm tra trạng thái trigger
+            was_triggering = self.state.is_triggering
             self.state.is_triggering = is_button_pressed(self.trigger_key)
+            
+            # Nếu vừa bắt đầu bắn
+            if self.state.is_triggering and not was_triggering:
+                self.state.trigger_start_time = time.time() * 1000
+                self.state.total_recoil_x = 0  # Reset tổng recoil
+                self.state.total_recoil_y = 0
+            # Nếu vừa thả nút bắn
+            elif not self.state.is_triggering and was_triggering:
+                self._return_to_original_position()
+            
+            self.state.was_triggering = was_triggering
             
         except Exception as e:
             print(f"[Anti-Recoil Key Update Error] {e}")
@@ -139,11 +156,13 @@ class AntiRecoil:
             dx = int(self.x_recoil)
             dy = int(self.y_recoil)
 
-            # Thêm random jitter nếu được bật
+            # Thêm random jitter nếu được bật (SỬA LỖI: chuyển float thành int)
             if self.random_jitter_x > 0:
-                dx += random.randint(-self.random_jitter_x, self.random_jitter_x)
+                jitter_x = int(self.random_jitter_x)
+                dx += random.randint(-jitter_x, jitter_x)
             if self.random_jitter_y > 0:
-                dy += random.randint(-self.random_jitter_y, self.random_jitter_y)
+                jitter_y = int(self.random_jitter_y)
+                dy += random.randint(-jitter_y, jitter_y)
 
             # Áp dụng scale với ADS
             dx = int(dx * self.scale_with_ads)
@@ -154,18 +173,54 @@ class AntiRecoil:
                 # Sử dụng chuyển động mượt nếu có
                 self.controller.move_smooth(
                     dx, dy, 
-                    segments=max(1, self.smooth_segments),
-                    ctrl_scale=self.smooth_ctrl_scale
+                    segments=max(1, int(self.smooth_segments)),
+                    ctrl_scale=float(self.smooth_ctrl_scale)
                 )
             else:
                 # Fallback về chuyển động thông thường
                 self.controller.move(dx, dy)
+
+            # Cập nhật tổng recoil đã áp dụng
+            self.state.total_recoil_x += dx
+            self.state.total_recoil_y += dy
 
             # Cập nhật thời gian pull cuối cùng
             self.state.last_pull_ms = time.time() * 1000
 
         except Exception as e:
             print(f"[Anti-Recoil Apply Error] {e}")
+
+    def _return_to_original_position(self):
+        """
+        HÀM TỰ ĐỘNG TRỞ VỀ VỊ TRÍ CŨ
+        Di chuyển chuột ngược lại để bù trừ tất cả recoil đã áp dụng
+        """
+        try:
+            if self.state.total_recoil_x != 0 or self.state.total_recoil_y != 0:
+                # Di chuyển ngược lại với tổng recoil đã áp dụng
+                return_x = -self.state.total_recoil_x
+                return_y = -self.state.total_recoil_y
+                
+                print(f"[Anti-Recoil] Returning to original position: X={return_x}, Y={return_y}")
+                
+                # Thực hiện chuyển động trở về
+                if hasattr(self.controller, "move_smooth"):
+                    # Sử dụng chuyển động mượt để trở về
+                    self.controller.move_smooth(
+                        return_x, return_y,
+                        segments=max(1, int(self.smooth_segments)),
+                        ctrl_scale=float(self.smooth_ctrl_scale)
+                    )
+                else:
+                    # Fallback về chuyển động thông thường
+                    self.controller.move(return_x, return_y)
+                
+                # Reset tổng recoil
+                self.state.total_recoil_x = 0
+                self.state.total_recoil_y = 0
+                
+        except Exception as e:
+            print(f"[Anti-Recoil Return Error] {e}")
 
     def get_status(self):
         """Lấy trạng thái hiện tại của anti-recoil"""
@@ -174,7 +229,9 @@ class AntiRecoil:
             "is_ads_held": self.state.is_ads_held,
             "is_triggering": self.state.is_triggering,
             "last_pull_ms": self.state.last_pull_ms,
-            "ads_hold_time": (time.time() * 1000) - self.state.ads_start_time if self.state.is_ads_held else 0
+            "ads_hold_time": (time.time() * 1000) - self.state.ads_start_time if self.state.is_ads_held else 0,
+            "total_recoil_x": self.state.total_recoil_x,
+            "total_recoil_y": self.state.total_recoil_y
         }
 
 
@@ -206,8 +263,10 @@ def anti_recoil_tick(
 
     rj = cfg_ar.get("random_jitter_px", {"x": 0, "y": 0})
     if rj.get("x", 0) or rj.get("y", 0):
-        dx += random.randint(-int(rj.get("x", 0)), int(rj.get("x", 0)))
-        dy += random.randint(-int(rj.get("y", 0)), int(rj.get("y", 0)))
+        jitter_x = int(rj.get("x", 0))
+        jitter_y = int(rj.get("y", 0))
+        dx += random.randint(-jitter_x, jitter_x)
+        dy += random.randint(-jitter_y, jitter_y)
 
     scale_ads = float(cfg_ar.get("scale_with_ads", 1.0))
     dx = int(dx * scale_ads)

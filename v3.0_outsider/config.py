@@ -29,6 +29,7 @@ class Config:
         self.fovsize = 100
         self.tbfovsize = 5
         self.tbdelay = 0.5
+        self.trigger_fire_rate_ms = 100  # Tốc độ bắn triggerbot (millisecond)
         # --- Normal Aim ---
         self.normal_x_speed = 3
         self.normal_y_speed = 3

@@ -14,7 +14,6 @@ import numpy as np  # Xử lý mảng số học
 import cv2        # OpenCV để xử lý ảnh
 from config import config  # Module cấu hình của ứng dụng
 from mouse import Mouse, is_button_pressed  # Module điều khiển chuột
-from detection import load_model, perform_detection  # Module AI detection
 
 
 def threaded_silent_move(controller, dx, dy):
@@ -38,13 +37,15 @@ class AimTracker:
     - Hỗ trợ 2 chế độ: Normal (mượt mà) và Silent (ẩn)
     - Triggerbot: tự động bắn khi phát hiện màu sắc
     """
-    def __init__(self, app, target_fps=80):
+    def __init__(self, app, detection_engine, target_fps=80):
         """
         CONSTRUCTOR - KHỞI TẠO AIMBOT
         app: Tham chiếu đến ứng dụng chính
+        detection_engine: DetectionEngine để lấy kết quả detection
         target_fps: FPS mục tiêu cho vòng lặp tracking (mặc định 80 FPS)
         """
         self.app = app  # Tham chiếu đến ứng dụng chính để truy cập UDP stream
+        self.detection_engine = detection_engine  # DetectionEngine để lấy kết quả detection
         
         # ========== CÁC THAM SỐ CẤU HÌNH (load từ config với giá trị mặc định) ==========
         # Tham số tốc độ và độ mượt mà
@@ -80,9 +81,7 @@ class AimTracker:
         )
         self._move_thread.start()                   # Bắt đầu luồng xử lý chuyển động
 
-        # ========== TẢI MÔ HÌNH AI VÀ KHỞI TẠO TRACKING ==========
-        self.model, self.class_names = load_model() # Load mô hình YOLO để phát hiện mục tiêu
-        print("Classes:", self.class_names)         # In ra các class có thể phát hiện (person, head...)
+        # ========== KHỞI TẠO TRACKING (KHÔNG CẦN LOAD MODEL NỮA) ==========
         self._stop_event = threading.Event()        # Sự kiện dừng luồng tracking
         self._target_fps = target_fps               # FPS mục tiêu cho vòng lặp tracking
         self._track_thread = threading.Thread(      # Luồng tracking chính
@@ -157,7 +156,7 @@ class AimTracker:
         HÀM TRACKING CHÍNH - XỬ LÝ MỘT FRAME
         Đây là hàm cốt lõi của aimbot, xử lý từng frame:
         1. Lấy frame mới nhất từ UDP stream
-        2. Chạy AI detection để tìm mục tiêu
+        2. Lấy kết quả detection từ DetectionEngine
         3. Tính toán và thực hiện chuyển động chuột
         4. Cập nhật hiển thị cho người dùng
         """
@@ -173,18 +172,24 @@ class AimTracker:
             h, w = img.shape[:2]  # Lấy kích thước ảnh (height, width)
             # Tạo object thông tin frame nhẹ với thuộc tính xres/yres để tương thích
             frame = type("FrameInfo", (), {"xres": w, "yres": h})()
-            bgr_img = img.copy()  # Copy để tránh modify ảnh gốc
         except Exception:
             return  # Lỗi lấy frame thì bỏ qua frame này
 
-        # ========== CHẠY AI DETECTION ==========
+        # ========== LẤY KẾT QUẢ DETECTION TỪ DETECTION ENGINE ==========
         try:
-            # Chạy AI detection (YOLO) để tìm mục tiêu trong ảnh
-            detection_results, mask = perform_detection(self.model, bgr_img)
+            # Lấy kết quả detection từ DetectionEngine (đã được xử lý)
+            detection_data = self.detection_engine.detect_and_track(img, frame)
+            
+            # Trích xuất dữ liệu từ kết quả detection
+            targets = detection_data['targets']  # Danh sách mục tiêu cho aimbot
+            detection_results = detection_data['detection_results']  # Kết quả detection gốc
+            mask = detection_data['mask']  # Mask để hiển thị
+            center_detection = detection_data['center_detection']  # Có phát hiện ở trung tâm không
+            img_with_overlays = detection_data['img']  # Ảnh đã vẽ overlay
             
             # Gửi frame đến luồng hiển thị cho người dùng
             try:
-                self.app.vision_store.set(bgr_img)  # Lưu ảnh gốc để hiển thị
+                self.app.vision_store.set(img_with_overlays)  # Lưu ảnh đã vẽ overlay
                 # Đảm bảo mask là 3-channel BGR cho OpenGL rendering
                 if mask is not None and len(mask.shape) == 2:
                     mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)  # Chuyển grayscale thành BGR
@@ -195,42 +200,13 @@ class AimTracker:
                 pass  # Bỏ qua lỗi hiển thị, không ảnh hưởng đến aimbot
         except Exception as e:
             print(f"[Aimbot Detection Error] {e}")  # In lỗi detection
-            detection_results = []  # Lỗi detection thì danh sách rỗng
-
-        # ========== XỬ LÝ KẾT QUẢ DETECTION VÀ TÌM MỤC TIÊU ==========
-        targets = []  # Danh sách mục tiêu để aim (tọa độ + khoảng cách)
-        if detection_results:
-            for det in detection_results:  # Duyệt qua từng detection từ AI
-                try:
-                    x, y, w, h = det["bbox"]  # Lấy bounding box (x, y, width, height)
-                    conf = det.get("confidence", 1.0)  # Lấy độ tin cậy của detection
-                    x1, y1 = int(x), int(y)  # Tọa độ góc trên trái
-                    x2, y2 = int(x + w), int(y + h)  # Tọa độ góc dưới phải
-                    y1 *= 1.03  # Điều chỉnh vị trí Y (offset đặc biệt cho game)
-                    
-                    # Vẽ bounding box của cơ thể lên ảnh để debug
-                    self._draw_body(bgr_img, x1, y1, x2, y2, conf)
-                    
-                    # Ước tính vị trí đầu trong bounding box của cơ thể
-                    head_positions = self._estimate_head_positions(x1, y1, x2, y2, bgr_img)
-                    for head_cx, head_cy, bbox in head_positions:
-                        self._draw_head_bbox(bgr_img, head_cx, head_cy)  # Vẽ điểm đầu
-                        # Tính khoảng cách từ đầu đến trung tâm màn hình
-                        d = math.hypot(head_cx - frame.xres / 2.0, head_cy - frame.yres / 2.0)
-                        targets.append((head_cx, head_cy, d))  # Thêm vào danh sách mục tiêu
-                except Exception as e:
-                    print(f"[Aimbot Head Position Error] {e}")  # In lỗi xử lý vị trí đầu
-
-        # ========== VẼ CÁC VÒNG FOV (Field of View) ==========
-        try:
-            self._draw_fovs(bgr_img, frame)  # Vẽ vòng tròn FOV aimbot và triggerbot
-        except Exception:
-            pass  # Bỏ qua lỗi vẽ FOV, không ảnh hưởng đến chức năng
+            targets = []  # Lỗi detection thì danh sách rỗng
+            center_detection = False
 
         # ========== THỰC HIỆN AIMBOT VÀ TRIGGERBOT ==========
         try:
             # Logic chính của aimbot: tính toán và thực hiện chuyển động chuột
-            self._aim_and_move(targets, frame, bgr_img)
+            self._aim_and_move(targets, frame, img, center_detection)
             
             # Chạy anti-recoil nếu có (bù đắp độ giật súng)
             try:
@@ -243,115 +219,8 @@ class AimTracker:
 
         # Hiển thị được xử lý bởi DisplayThread; không cần làm gì thêm ở đây
 
-    def _draw_head_bbox(self, img, headx, heady):
-        """
-        HÀM VẼ ĐIỂM ĐẦU
-        Vẽ một chấm tròn đỏ tại vị trí đầu được phát hiện để debug
-        """
-        cv2.circle(img, (int(headx), int(heady)), 2, (0, 0, 255), -1)  # Vẽ chấm tròn đỏ
 
-    def _estimate_head_positions(self, x1, y1, x2, y2, img):
-        """
-        HÀM ƯỚC TÍNH VỊ TRÍ ĐẦU TRONG BOUNDING BOX CỦA CƠ THỂ
-        Đây là thuật toán thông minh để tìm vị trí đầu chính xác:
-        1. Tính toán vùng có khả năng chứa đầu dựa trên tỷ lệ cơ thể
-        2. Tạo ROI (Region of Interest) nhỏ xung quanh vùng đó
-        3. Chạy AI detection lại trên ROI để tìm đầu chính xác
-        4. Áp dụng offset từ config để điều chỉnh vị trí cuối cùng
-        """
-        # Lấy offset từ config (điều chỉnh vị trí nhắm)
-        offsetY = getattr(config, "offsetY", 0)  # Offset Y (lên/xuống)
-        offsetX = getattr(config, "offsetX", 0)  # Offset X (trái/phải)
-
-        # Tính kích thước bounding box của cơ thể
-        width = x2 - x1   # Chiều rộng
-        height = y2 - y1  # Chiều cao
-
-        # ========== CROP NHẸ ĐỂ TẬP TRUNG VÀO VÙNG ĐẦU ==========
-        top_crop_factor = 0.10    # Cắt 10% phía trên (loại bỏ chân)
-        side_crop_factor = 0.10   # Cắt 10% hai bên (tập trung vào giữa)
-
-        # Tính vùng hiệu quả sau khi crop
-        effective_y1 = y1 + height * top_crop_factor
-        effective_height = height * (1 - top_crop_factor)
-        effective_x1 = x1 + width * side_crop_factor
-        effective_x2 = x2 - width * side_crop_factor
-        effective_width = effective_x2 - effective_x1
-
-        # ========== TÍNH VỊ TRÍ ĐẦU CƠ BẢN VỚI OFFSET ==========
-        center_x = (effective_x1 + effective_x2) / 2  # Trung tâm X của vùng hiệu quả
-        headx_base = center_x + effective_width * (offsetX / 100)  # Vị trí X với offset
-        heady_base = effective_y1 + effective_height * (offsetY / 100)  # Vị trí Y với offset
-
-        # ========== TẠO ROI (REGION OF INTEREST) XUNG QUANH VỊ TRÍ ĐẦU ==========
-        pixel_marginx = 40  # Margin X (pixel) xung quanh vị trí đầu
-        pixel_marginy = 10  # Margin Y (pixel) xung quanh vị trí đầu
-
-        # Tính tọa độ ROI với giới hạn ảnh
-        x1_roi = int(max(headx_base - pixel_marginx, 0))
-        y1_roi = int(max(heady_base - pixel_marginy, 0))
-        x2_roi = int(min(headx_base + pixel_marginx, img.shape[1]))
-        y2_roi = int(min(heady_base + pixel_marginy, img.shape[0]))
-
-        # Cắt ROI từ ảnh gốc
-        roi = img[y1_roi:y2_roi, x1_roi:x2_roi]
-        cv2.rectangle(img, (x1_roi, y1_roi), (x2_roi, y2_roi), (0, 0, 255), 2)  # Vẽ ROI
-
-        # ========== CHẠY AI DETECTION LẠI TRÊN ROI ==========
-        results = []
-        detections = []
-        try:
-            detections, mask = perform_detection(self.model, roi)  # Chạy YOLO trên ROI
-        except Exception as e:
-            print(f"[Aimbot ROI Detection Error] {e}")
-
-        if not detections:
-            # Không tìm thấy đầu trong ROI → dùng vị trí ước tính với offset
-            results.append((headx_base, heady_base, (x1_roi, y1_roi, x2_roi, y2_roi)))
-        else:
-            # Tìm thấy đầu trong ROI → tính vị trí chính xác
-            for det in detections:
-                x, y, w, h = det["bbox"]  # Bounding box của đầu trong ROI
-                # Vẽ bounding box của đầu lên ảnh chính
-                cv2.rectangle(
-                    img,
-                    (x1_roi + x, y1_roi + y),
-                    (x1_roi + x + w, y1_roi + y + h),
-                    (0, 255, 0),  # Màu xanh lá
-                    2,
-                )
-
-                # Tính vị trí đầu từ detection trong ROI
-                headx_det = x1_roi + x + w / 2  # Trung tâm X của đầu
-                heady_det = y1_roi + y + h / 2  # Trung tâm Y của đầu
-
-                # Áp dụng offset lên vị trí detection
-                headx_det += effective_width * (offsetX / 100)
-                heady_det += effective_height * (offsetY / 100)
-
-                # Thêm vào kết quả
-                results.append((headx_det, heady_det, (x1_roi + x, y1_roi + y, w, h)))
-
-        return results
-
-    def _draw_body(self, img, x1, y1, x2, y2, conf):
-        """
-        HÀM VẼ BOUNDING BOX CỦA CƠ THỂ
-        Vẽ hình chữ nhật xanh dương quanh cơ thể được phát hiện
-        Hiển thị độ tin cậy của detection để debug
-        """
-        cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)  # Vẽ hình chữ nhật xanh dương
-        cv2.putText(
-            img,
-            f"Body {conf:.2f}",  # Hiển thị độ tin cậy
-            (int(x1), int(y1) - 6),  # Vị trí text (phía trên bounding box)
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,  # Kích thước font
-            (255, 0, 0),  # Màu xanh dương
-            2,  # Độ dày text
-        )
-
-    def _aim_and_move(self, targets, frame, img):
+    def _aim_and_move(self, targets, frame, img, center_detection=False):
         """
         HÀM LOGIC AIMBOT VÀ TRIGGERBOT CHÍNH
         Đây là trái tim của aimbot, xử lý:
@@ -432,36 +301,9 @@ class AimTracker:
                 if (getattr(config, "enabletb", False) and 
                     is_button_pressed(getattr(config, "trigger_button", 1))):
                     
-                    # Tạo ROI nhỏ ở trung tâm màn hình (nơi crosshair)
-                    cx0, cy0 = int(frame.xres // 2), int(frame.yres // 2)  # Trung tâm màn hình
-                    ROI_SIZE = 5  # Kích thước ROI nhỏ (5x5 pixel)
-                    x1, y1 = max(cx0 - ROI_SIZE, 0), max(cy0 - ROI_SIZE, 0)
-                    x2, y2 = (min(cx0 + ROI_SIZE, img.shape[1]), min(cy0 + ROI_SIZE, img.shape[0]))
-                    roi = img[y1:y2, x1:x2]  # Cắt ROI từ ảnh
-
-                    if roi.size == 0:
-                        return  # ROI rỗng → bỏ qua
-
-                    # Chuyển đổi sang HSV để phát hiện màu sắc
-                    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-                    # Lấy ngưỡng màu từ model (đã được train)
-                    HSV_UPPER = self.model[1]  # Ngưỡng màu trên
-                    HSV_LOWER = self.model[0]  # Ngưỡng màu dưới
-
-                    # Tạo mask để phát hiện màu sắc
-                    mask = cv2.inRange(hsv, HSV_LOWER, HSV_UPPER)
-                    detected = cv2.countNonZero(mask) > 0  # Có pixel màu target không?
-
-                    # Debug: hiển thị ROI và mask nếu được bật
-                    if getattr(config, "debug_show", False):
-                        cv2.imshow("ROI", roi)
-                        cv2.imshow("Mask", mask)
-                        cv2.waitKey(1)
-
-                    # Nếu phát hiện màu sắc → tự động bắn
-                    if detected:
-                        cv2.putText(img, "PURPLE DETECTED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    # Sử dụng kết quả detection từ DetectionEngine (không cần detect riêng)
+                    if center_detection:
+                        # Có phát hiện màu sắc ở trung tâm → tự động bắn
                         now = time.time()
                         # Kiểm tra delay để tránh bắn quá nhanh
                         if now - self.last_tb_click_time >= float(getattr(config, "tbdelay", self.tbdelay)):
@@ -485,22 +327,3 @@ class AimTracker:
                     daemon=True,
                 ).start()
 
-    def _draw_fovs(self, img, frame):
-        """
-        HÀM VẼ CÁC VÒNG FOV (FIELD OF VIEW)
-        Vẽ vòng tròn FOV aimbot và triggerbot lên ảnh để người dùng thấy phạm vi hoạt động
-        """
-        center_x = int(frame.xres / 2)
-        center_y = int(frame.yres / 2)
-        
-        # Vẽ vòng tròn FOV aimbot (màu xanh lá)
-        aimbot_fov = int(getattr(config, "fovsize", self.fovsize))
-        cv2.circle(img, (center_x, center_y), aimbot_fov, (0, 255, 0), 2)
-        
-        # Vẽ vòng tròn FOV triggerbot (màu đỏ)
-        triggerbot_fov = int(getattr(config, "tbfovsize", self.tbfovsize))
-        cv2.circle(img, (center_x, center_y), triggerbot_fov, (0, 0, 255), 2)
-        
-        # Vẽ crosshair ở trung tâm
-        cv2.line(img, (center_x - 10, center_y), (center_x + 10, center_y), (255, 255, 255), 1)
-        cv2.line(img, (center_x, center_y - 10), (center_x, center_y + 10), (255, 255, 255), 1)

@@ -8,6 +8,7 @@
     "in_game_sens": 0.189,
     "tbfovsize": 5,
     "tbdelay": 0.0,
+    "trigger_fire_rate_ms": 100,
     "color": "purple",
     "mode": "Normal",
     "enableaim": true,

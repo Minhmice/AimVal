@@ -22,12 +22,7 @@ from viewer import (  # Module hiển thị video và UDP
 )
 from aim import AimTracker  # Module aimbot chính
 from anti_recoil import AntiRecoil  # Module chống giật súng
-from esp import (
-    draw_fov_circles,
-    draw_body_bbox,
-    draw_head_bbox,
-    draw_triggerbot_status,
-)  # Module vẽ ESP
+from esp import DetectionEngine  # Detection Engine chính
 
 # ========== MAPPING CÁC NÚT CHUỘT ==========
 # Từ điển chuyển đổi mã nút chuột thành tên hiển thị
@@ -113,8 +108,11 @@ class ViewerApp(ctk.CTk):
         self.use_gl = False  # Có sử dụng OpenGL không
 
         # ========== KHỞI TẠO CÁC MODULE CHÍNH ==========
+        # Tạo DetectionEngine trước (trung tâm detection)
+        self.detection_engine = DetectionEngine()  # Tạo Detection Engine
+        
         # Tạo các module chính của ứng dụng
-        self.tracker = AimTracker(app=self, target_fps=80)  # Tạo aimbot với FPS 80
+        self.tracker = AimTracker(app=self, detection_engine=self.detection_engine, target_fps=80)  # Tạo aimbot với DetectionEngine
         self.anti_recoil = AntiRecoil(app=self)  # Tạo anti-recoil
 
         # ========== TẠO GIAO DIỆN TAB ==========
@@ -343,6 +341,7 @@ class ViewerApp(ctk.CTk):
             # ========== CÀI ĐẶT TRIGGERBOT ==========
             "tbfovsize": getattr(config, "tbfovsize", 70),                   # FOV triggerbot
             "tbdelay": getattr(config, "tbdelay", 0.08),                     # Độ trễ triggerbot
+            "trigger_fire_rate_ms": getattr(config, "trigger_fire_rate_ms", 100),  # Tốc độ bắn triggerbot
             "color": getattr(config, "color", "yellow"),                     # Màu sắc phát hiện
             
             # ========== CÀI ĐẶT CHUNG ==========
@@ -709,6 +708,17 @@ class ViewerApp(ctk.CTk):
             is_float=True,
         )
         self._register_slider("tbdelay", s, l, 0.0, 1.0, True)
+        # TB Fire Rate
+        s, l = self._add_slider_with_label(
+            self.tab_tb,
+            "TB Fire Rate (ms)",
+            10,
+            1000,
+            float(getattr(config, "trigger_fire_rate_ms", 100)),
+            self._on_trigger_fire_rate_changed,
+            is_float=True,
+        )
+        self._register_slider("trigger_fire_rate_ms", s, l, 10, 1000, True)
 
         # Enable TB
         self.var_enabletb = tk.BooleanVar(value=getattr(config, "enabletb", False))
@@ -950,6 +960,13 @@ class ViewerApp(ctk.CTk):
     def _on_tbfovsize_changed(self, val):
         config.tbfovsize = val
         self.tracker.tbfovsize = val
+
+    def _on_trigger_fire_rate_changed(self, val):
+        """Callback cho trigger fire rate"""
+        config.trigger_fire_rate_ms = val
+        # Cập nhật tracker nếu có thuộc tính này
+        if hasattr(self.tracker, 'fire_rate_ms'):
+            self.tracker.fire_rate_ms = val
 
     def _on_enableaim_changed(self):
         config.enableaim = self.var_enableaim.get()
