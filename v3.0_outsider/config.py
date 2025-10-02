@@ -37,5 +37,20 @@ class Config:
         self.normalsmooth = 30
         self.normalsmoothfov = 30
 
+        # --- Anti-Recoil Settings ---
+        self.anti_recoil_enabled = False
+        self.anti_recoil_key = 3  # Side Mouse 4 (1 phím duy nhất)
+        self.anti_recoil_require_initial_target = True  # Bắt buộc có mục tiêu để bắt đầu
+        self.anti_recoil_x = 0
+        self.anti_recoil_y = 0
+        self.anti_recoil_fire_rate = 100
+        self.anti_recoil_hold_time = 0
+        self.anti_recoil_only_triggering = True
+        self.anti_recoil_scale_ads = 1.0
+        self.anti_recoil_smooth_segments = 2
+        self.anti_recoil_smooth_scale = 0.25
+        self.anti_recoil_jitter_x = 0
+        self.anti_recoil_jitter_y = 0
+
 
 config = Config()

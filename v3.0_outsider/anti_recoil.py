@@ -23,6 +23,10 @@ class AntiRecoilState:
         self.total_recoil_x = 0  # Tổng recoil X đã áp dụng
         self.total_recoil_y = 0  # Tổng recoil Y đã áp dụng
         self.was_triggering = False  # Trạng thái bắn trước đó
+        
+        # ========== TRẠNG THÁI MỚI CHO 1 PHÍM ==========
+        self.is_anti_recoil_active = False  # Trạng thái anti-recoil đang chạy
+        self.initial_target_detected = False  # Đã phát hiện mục tiêu ban đầu
 
 
 class AntiRecoil:
@@ -50,9 +54,9 @@ class AntiRecoil:
         self.random_jitter_x = getattr(config, "anti_recoil_jitter_x", 0)
         self.random_jitter_y = getattr(config, "anti_recoil_jitter_y", 0)
         
-        # Phím điều khiển
-        self.ads_key = getattr(config, "anti_recoil_ads_key", 1)  # Right mouse button
-        self.trigger_key = getattr(config, "anti_recoil_trigger_key", 0)  # Left mouse button
+        # Phím điều khiển (1 phím duy nhất)
+        self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)  # Side Mouse 4
+        self.require_initial_target = getattr(config, "anti_recoil_require_initial_target", True)  # Bắt buộc có mục tiêu để bắt đầu
 
     def update_config(self):
         """Cập nhật cấu hình từ config"""
@@ -67,29 +71,62 @@ class AntiRecoil:
         self.smooth_ctrl_scale = getattr(config, "anti_recoil_smooth_scale", 0.25)
         self.random_jitter_x = getattr(config, "anti_recoil_jitter_x", 0)
         self.random_jitter_y = getattr(config, "anti_recoil_jitter_y", 0)
-        self.ads_key = getattr(config, "anti_recoil_ads_key", 1)
-        self.trigger_key = getattr(config, "anti_recoil_trigger_key", 0)
+        
+        # Cập nhật phím mới
+        self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)
+        self.require_initial_target = getattr(config, "anti_recoil_require_initial_target", True)
 
-    def tick(self):
+    def check_target_in_fov(self, detection_engine):
         """
-        HÀM XỬ LÝ ANTI-RECOIL CHÍNH
-        - Kiểm tra điều kiện kích hoạt
-        - Áp dụng chuyển động bù trừ recoil
-        - Cập nhật trạng thái
+        KIỂM TRA CÓ MỤC TIÊU TRONG FOV KHÔNG
+        - Sử dụng kết quả từ DetectionEngine
+        - Kiểm tra có người trong FOV triggerbot không
+        - Trả về True nếu có mục tiêu, False nếu không
+        """
+        try:
+            detection_data = detection_engine.get_last_detection()
+            if not detection_data or not detection_data.get('detection_results'):
+                return False
+            
+            # Kiểm tra có detection results không
+            return len(detection_data['detection_results']) > 0
+        except Exception as e:
+            print(f"[Anti-Recoil FOV Check Error] {e}")
+            return False
+
+    def tick(self, detection_engine=None):
+        """
+        HÀM XỬ LÝ ANTI-RECOIL CHÍNH (CẬP NHẬT)
+        - Chỉ cần 1 phím để điều khiển
+        - Kiểm tra có mục tiêu trong FOV để bắt đầu
+        - Tiếp tục chạy cho đến khi thả phím
         """
         if not self.enabled:
             return
 
         try:
-            # Cập nhật trạng thái phím
-            self._update_key_states()
+            # Kiểm tra phím anti-recoil
+            key_pressed = is_button_pressed(self.anti_recoil_key)
             
-            # Kiểm tra điều kiện kích hoạt
-            if not self._should_activate():
-                return
-
-            # Áp dụng anti-recoil
-            self._apply_anti_recoil()
+            if key_pressed and not self.state.is_anti_recoil_active:
+                # Bắt đầu: Kiểm tra có mục tiêu trong FOV không
+                if self.require_initial_target and detection_engine:
+                    if not self.check_target_in_fov(detection_engine):
+                        return  # Không có mục tiêu → không bắt đầu
+                
+                self.state.is_anti_recoil_active = True
+                self.state.initial_target_detected = True
+                print("[Anti-Recoil] Started - Target detected in FOV")
+            
+            elif not key_pressed and self.state.is_anti_recoil_active:
+                # Dừng: Thả phím
+                self.state.is_anti_recoil_active = False
+                self.state.initial_target_detected = False
+                print("[Anti-Recoil] Stopped - Key released")
+            
+            # Chỉ chạy anti-recoil khi đang active
+            if self.state.is_anti_recoil_active:
+                self._apply_anti_recoil()
             
         except Exception as e:
             print(f"[Anti-Recoil Error] {e}")

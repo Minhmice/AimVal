@@ -427,6 +427,11 @@ class ViewerApp(ctk.CTk):
                 self.mouse_dpi_entry.delete(0, tk.END)  # Xóa nội dung cũ
                 self.mouse_dpi_entry.insert(0, str(data["mouse_dpi"]))  # Chèn giá trị mới
 
+            # ========== CẬP NHẬT ANTI-RECOIL KEY ==========
+            if "anti_recoil_key" in data:
+                key_name = BUTTONS.get(data["anti_recoil_key"], "Side Mouse 4 Button")
+                self.ar_key_option.set(key_name)
+
             # ========== RELOAD MÔ HÌNH AI ==========
             from detection import reload_model
             self.tracker.model, self.tracker.class_names = reload_model()  # Reload YOLO model
@@ -752,6 +757,28 @@ class ViewerApp(ctk.CTk):
         ).pack(pady=6, anchor="w")
         self._checkbox_vars["anti_recoil_enabled"] = self.var_anti_recoil_enabled
 
+        # Anti-Recoil Key
+        ctk.CTkLabel(self.tab_ar, text="Anti-Recoil Key:").pack(pady=5, anchor="w")
+        self.ar_key_option = ctk.CTkOptionMenu(
+            self.tab_ar,
+            values=list(BUTTONS.values()),
+            command=self._on_ar_key_changed
+        )
+        self.ar_key_option.pack(pady=5, fill="x")
+        self._option_widgets["anti_recoil_key"] = self.ar_key_option
+
+        # Require Initial Target
+        self.var_anti_recoil_require_target = tk.BooleanVar(
+            value=getattr(config, "anti_recoil_require_initial_target", True)
+        )
+        ctk.CTkCheckBox(
+            self.tab_ar,
+            text="Require Target in FOV to Start",
+            variable=self.var_anti_recoil_require_target,
+            command=self._on_ar_require_target_changed,
+        ).pack(pady=6, anchor="w")
+        self._checkbox_vars["anti_recoil_require_initial_target"] = self.var_anti_recoil_require_target
+
         # X Recoil
         s, l = self._add_slider_with_label(
             self.tab_ar,
@@ -979,6 +1006,17 @@ class ViewerApp(ctk.CTk):
         config.anti_recoil_enabled = self.var_anti_recoil_enabled.get()
         self.anti_recoil.update_config()
 
+    def _on_ar_key_changed(self, choice):
+        """Callback khi thay đổi phím anti-recoil"""
+        key_code = next((k for k, v in BUTTONS.items() if v == choice), 3)
+        config.anti_recoil_key = key_code
+        self.anti_recoil.update_config()
+
+    def _on_ar_require_target_changed(self):
+        """Callback khi thay đổi yêu cầu mục tiêu"""
+        config.anti_recoil_require_initial_target = self.var_anti_recoil_require_target.get()
+        self.anti_recoil.update_config()
+
     def _on_anti_recoil_x_changed(self, val):
         config.anti_recoil_x = val
         self.anti_recoil.x_recoil = val
@@ -1127,9 +1165,9 @@ class ViewerApp(ctk.CTk):
                     )
                 self.status_label.configure(text="UDP Connected", text_color="green")
 
-                # Chạy anti-recoil tick
+                # Chạy anti-recoil tick với DetectionEngine
                 try:
-                    self.anti_recoil.tick()
+                    self.anti_recoil.tick(self.detection_engine)
                 except Exception as e:
                     print(f"[Anti-Recoil Tick Error] {e}")
             else:

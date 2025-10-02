@@ -420,16 +420,16 @@ class DetectionEngine:
         # Vẽ crosshair
         draw_crosshair(img, center_x, center_y)
         
-        # Vẽ status text
-        aim_enabled = getattr(config, "enableaim", False)
-        trigger_enabled = getattr(config, "enabletb", False)
+        # Vẽ status text (ĐÃ ẨN - CHỈ HIỂN THỊ ESP BOX VÀ FOV)
+        # aim_enabled = getattr(config, "enableaim", False)
+        # trigger_enabled = getattr(config, "enabletb", False)
         
-        draw_aimbot_status(img, aim_enabled)
-        draw_triggerbot_status(img, trigger_enabled)
+        # draw_aimbot_status(img, aim_enabled)
+        # draw_triggerbot_status(img, trigger_enabled)
         
-        # Vẽ thông tin detection
-        if self.last_detection_results:
-            draw_target_info(img, self.last_detection_results)
+        # Vẽ thông tin detection (ĐÃ ẨN)
+        # if self.last_detection_results:
+        #     draw_target_info(img, self.last_detection_results)
     
     def get_last_detection(self):
         """
