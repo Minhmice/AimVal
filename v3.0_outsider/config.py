@@ -7,8 +7,6 @@ class Config:
         self.offsetX = -2
         self.offsetY = 3
 
-        # color removed (fixed to purple in detection)
-
         # --- Debug / Viewer ---
         self.debug_show = False  # gate cv2.imshow windows for smoothness
         self.viewer_port = 8080
@@ -18,9 +16,11 @@ class Config:
         self.viewer_metrics_hz = 120.0
 
         # --- Mouse / MAKCU ---
-        self.selected_mouse_button = 1
-        self.selected_tb_btn = 1
-        self.selected_2_tb = 2
+        # Aimbot buttons (2 buttons)
+        self.aim_button_1 = 1  # Button đầu tiên cho aim
+        self.aim_button_2 = 2  # Button thứ hai cho aim
+        # Triggerbot button (1 button)
+        self.trigger_button = 1  # Button cho triggerbot
         self.in_game_sens = 0.235
         self.mouse_dpi = 800
         # --- Aimbot Mode ---
