@@ -767,17 +767,17 @@ class ViewerApp(ctk.CTk):
         self.ar_key_option.pack(pady=5, fill="x")
         self._option_widgets["anti_recoil_key"] = self.ar_key_option
 
-        # Require Initial Target
-        self.var_anti_recoil_require_target = tk.BooleanVar(
-            value=getattr(config, "anti_recoil_require_initial_target", True)
+        # Require Aim Active
+        self.var_anti_recoil_require_aim = tk.BooleanVar(
+            value=getattr(config, "anti_recoil_require_aim_active", True)
         )
         ctk.CTkCheckBox(
             self.tab_ar,
-            text="Require Target in FOV to Start",
-            variable=self.var_anti_recoil_require_target,
-            command=self._on_ar_require_target_changed,
+            text="Require Aim Active to Start",
+            variable=self.var_anti_recoil_require_aim,
+            command=self._on_ar_require_aim_changed,
         ).pack(pady=6, anchor="w")
-        self._checkbox_vars["anti_recoil_require_initial_target"] = self.var_anti_recoil_require_target
+        self._checkbox_vars["anti_recoil_require_aim_active"] = self.var_anti_recoil_require_aim
 
         # X Recoil
         s, l = self._add_slider_with_label(
@@ -1012,9 +1012,9 @@ class ViewerApp(ctk.CTk):
         config.anti_recoil_key = key_code
         self.anti_recoil.update_config()
 
-    def _on_ar_require_target_changed(self):
-        """Callback khi thay đổi yêu cầu mục tiêu"""
-        config.anti_recoil_require_initial_target = self.var_anti_recoil_require_target.get()
+    def _on_ar_require_aim_changed(self):
+        """Callback khi thay đổi yêu cầu aim active"""
+        config.anti_recoil_require_aim_active = self.var_anti_recoil_require_aim.get()
         self.anti_recoil.update_config()
 
     def _on_anti_recoil_x_changed(self, val):

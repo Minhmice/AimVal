@@ -56,7 +56,7 @@ class AntiRecoil:
         
         # Phím điều khiển (1 phím duy nhất)
         self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)  # Side Mouse 4
-        self.require_initial_target = getattr(config, "anti_recoil_require_initial_target", True)  # Bắt buộc có mục tiêu để bắt đầu
+        self.require_aim_active = getattr(config, "anti_recoil_require_aim_active", True)  # Bắt buộc aim đang hoạt động
 
     def update_config(self):
         """Cập nhật cấu hình từ config"""
@@ -74,31 +74,30 @@ class AntiRecoil:
         
         # Cập nhật phím mới
         self.anti_recoil_key = getattr(config, "anti_recoil_key", 3)
-        self.require_initial_target = getattr(config, "anti_recoil_require_initial_target", True)
+        self.require_aim_active = getattr(config, "anti_recoil_require_aim_active", True)
 
-    def check_target_in_fov(self, detection_engine):
+    def check_aim_active(self):
         """
-        KIỂM TRA CÓ MỤC TIÊU TRONG FOV KHÔNG
-        - Sử dụng kết quả từ DetectionEngine
-        - Kiểm tra có người trong FOV triggerbot không
-        - Trả về True nếu có mục tiêu, False nếu không
+        KIỂM TRA AIM CÓ ĐANG HOẠT ĐỘNG KHÔNG
+        - Kiểm tra aim_button_1 hoặc aim_button_2 có được nhấn không
+        - Trả về True nếu aim đang hoạt động, False nếu không
         """
         try:
-            detection_data = detection_engine.get_last_detection()
-            if not detection_data or not detection_data.get('detection_results'):
-                return False
+            from mouse import is_button_pressed
+            aim_button_1 = getattr(config, "aim_button_1", 1)
+            aim_button_2 = getattr(config, "aim_button_2", 2)
             
-            # Kiểm tra có detection results không
-            return len(detection_data['detection_results']) > 0
+            # Kiểm tra có phím aim nào được nhấn không
+            return (is_button_pressed(aim_button_1) or is_button_pressed(aim_button_2))
         except Exception as e:
-            print(f"[Anti-Recoil FOV Check Error] {e}")
+            print(f"[Anti-Recoil Aim Check Error] {e}")
             return False
 
     def tick(self, detection_engine=None):
         """
         HÀM XỬ LÝ ANTI-RECOIL CHÍNH (CẬP NHẬT)
         - Chỉ cần 1 phím để điều khiển
-        - Kiểm tra có mục tiêu trong FOV để bắt đầu
+        - Kiểm tra aim có đang hoạt động để bắt đầu
         - Tiếp tục chạy cho đến khi thả phím
         """
         if not self.enabled:
@@ -109,14 +108,14 @@ class AntiRecoil:
             key_pressed = is_button_pressed(self.anti_recoil_key)
             
             if key_pressed and not self.state.is_anti_recoil_active:
-                # Bắt đầu: Kiểm tra có mục tiêu trong FOV không
-                if self.require_initial_target and detection_engine:
-                    if not self.check_target_in_fov(detection_engine):
-                        return  # Không có mục tiêu → không bắt đầu
+                # Bắt đầu: Kiểm tra aim có đang hoạt động không
+                if self.require_aim_active:
+                    if not self.check_aim_active():
+                        return  # Aim không hoạt động → không bắt đầu
                 
                 self.state.is_anti_recoil_active = True
                 self.state.initial_target_detected = True
-                print("[Anti-Recoil] Started - Target detected in FOV")
+                print("[Anti-Recoil] Started - Aim is active")
             
             elif not key_pressed and self.state.is_anti_recoil_active:
                 # Dừng: Thả phím
@@ -131,60 +130,6 @@ class AntiRecoil:
         except Exception as e:
             print(f"[Anti-Recoil Error] {e}")
 
-    def _update_key_states(self):
-        """Cập nhật trạng thái các phím điều khiển"""
-        try:
-            # Kiểm tra trạng thái ADS
-            ads_pressed = is_button_pressed(self.ads_key)
-            if ads_pressed and not self.state.is_ads_held:
-                # Bắt đầu giữ ADS
-                self.state.is_ads_held = True
-                self.state.ads_start_time = time.time() * 1000  # Chuyển sang millisecond
-            elif not ads_pressed and self.state.is_ads_held:
-                # Thả ADS
-                self.state.is_ads_held = False
-                self.state.ads_start_time = 0
-
-            # Kiểm tra trạng thái trigger
-            was_triggering = self.state.is_triggering
-            self.state.is_triggering = is_button_pressed(self.trigger_key)
-            
-            # Nếu vừa bắt đầu bắn
-            if self.state.is_triggering and not was_triggering:
-                self.state.trigger_start_time = time.time() * 1000
-                self.state.total_recoil_x = 0  # Reset tổng recoil
-                self.state.total_recoil_y = 0
-            # Nếu vừa thả nút bắn
-            elif not self.state.is_triggering and was_triggering:
-                self._return_to_original_position()
-            
-            self.state.was_triggering = was_triggering
-            
-        except Exception as e:
-            print(f"[Anti-Recoil Key Update Error] {e}")
-
-    def _should_activate(self):
-        """Kiểm tra xem có nên kích hoạt anti-recoil không"""
-        # Kiểm tra điều kiện cơ bản
-        if not self.state.is_ads_held:
-            return False
-
-        # Kiểm tra thời gian giữ ADS tối thiểu
-        if self.hold_time_ms > 0:
-            held_time = (time.time() * 1000) - self.state.ads_start_time
-            if held_time < self.hold_time_ms:
-                return False
-
-        # Kiểm tra điều kiện trigger
-        if self.only_when_triggering and not self.state.is_triggering:
-            return False
-
-        # Kiểm tra fire rate
-        now_ms = time.time() * 1000
-        if now_ms - self.state.last_pull_ms < self.fire_rate_ms:
-            return False
-
-        return True
 
     def _apply_anti_recoil(self):
         """Áp dụng chuyển động anti-recoil"""
