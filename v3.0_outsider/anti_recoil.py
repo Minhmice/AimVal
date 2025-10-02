@@ -5,7 +5,7 @@ import time
 import random
 from config import config
 from mouse import Mouse, is_button_pressed
-from smooth import smooth_movement
+from smooth import move_smooth_to_position
 
 
 class AntiRecoilState:
@@ -107,41 +107,72 @@ class AntiRecoil:
             # Kiểm tra có phím anti-recoil nào được nhấn không
             key_pressed = self.check_anti_recoil_keys()
             
-            if key_pressed and not self.state.is_anti_recoil_active:
-                # Bắt đầu: Kiểm tra hold time
-                if self.hold_time_ms > 0:
-                    # Cần hold đủ thời gian trước khi kích hoạt
-                    if not hasattr(self.state, 'hold_start_time'):
-                        self.state.hold_start_time = time.time() * 1000  # Bắt đầu đếm hold time
+            if key_pressed:
+                if not self.state.is_anti_recoil_active:
+                    # Bắt đầu: Kiểm tra hold time
+                    if self.hold_time_ms > 0:
+                        # Cần hold đủ thời gian trước khi kích hoạt
+                        if not hasattr(self.state, 'hold_start_time'):
+                            self.state.hold_start_time = time.time() * 1000  # Bắt đầu đếm hold time
+                            print(f"[Anti-Recoil] Hold started - Need {self.hold_time_ms}ms")
+                            return  # Chờ đủ thời gian hold
+                        else:
+                            held_time = (time.time() * 1000) - self.state.hold_start_time
+                            if held_time < self.hold_time_ms:
+                                # Chưa đủ thời gian hold, tiếp tục chờ
+                                remaining = self.hold_time_ms - held_time
+                                if int(remaining) % 100 == 0:  # Log mỗi 100ms
+                                    print(f"[Anti-Recoil] Hold time remaining: {int(remaining)}ms")
+                                return
+                            else:
+                                # Đã đủ thời gian hold, kích hoạt anti-recoil
+                                print(f"[Anti-Recoil] Hold completed - Starting anti-recoil")
                     else:
-                        held_time = (time.time() * 1000) - self.state.hold_start_time
-                        if held_time < self.hold_time_ms:
-                            return  # Chưa đủ thời gian hold
+                        # Không cần hold time, kích hoạt ngay
+                        print("[Anti-Recoil] Started immediately - No hold time required")
+                    
+                    # Lưu vị trí chuột khi bắt đầu
+                    try:
+                        current_pos = self.controller.get_position()
+                        if current_pos:
+                            self.state.start_mouse_x, self.state.start_mouse_y = current_pos
+                            print(f"[Anti-Recoil] Start position saved: X={self.state.start_mouse_x}, Y={self.state.start_mouse_y}")
+                    except Exception as e:
+                        print(f"[Anti-Recoil] Could not get start position: {e}")
+                        # Fallback: sử dụng vị trí mặc định
+                        self.state.start_mouse_x, self.state.start_mouse_y = 0, 0
+                    
+                    self.state.is_anti_recoil_active = True
+                    self.state.initial_target_detected = True
+                    
+                    # Reset hold time sau khi kích hoạt
+                    if hasattr(self.state, 'hold_start_time'):
+                        delattr(self.state, 'hold_start_time')
                 
-                # Lưu vị trí chuột khi bắt đầu
-                current_pos = smooth_movement.get_position()
-                if current_pos:
-                    self.state.start_mouse_x, self.state.start_mouse_y = current_pos
-                
-                self.state.is_anti_recoil_active = True
-                self.state.initial_target_detected = True
-                print("[Anti-Recoil] Started - Key pressed")
+                # Chạy anti-recoil khi đang active
+                if self.state.is_anti_recoil_active:
+                    self._apply_anti_recoil()
             
-            elif not key_pressed and self.state.is_anti_recoil_active:
-                # Dừng: Thả phím - Quay về vị trí ban đầu
-                self.state.is_anti_recoil_active = False
-                self.state.initial_target_detected = False
-                
-                # Quay về vị trí ban đầu với smooth movement
-                self._return_to_start_position()
-                
-                if hasattr(self.state, 'hold_start_time'):
-                    delattr(self.state, 'hold_start_time')  # Reset hold time
-                print("[Anti-Recoil] Stopped - Key released")
+            else:
+                # Không có phím nào được nhấn
+                if self.state.is_anti_recoil_active:
+                    # Dừng: Thả phím - Quay về vị trí ban đầu
+                    self.state.is_anti_recoil_active = False
+                    self.state.initial_target_detected = False
+                    
+                    # Quay về vị trí ban đầu với smooth movement
+                    self._return_to_start_position()
+                    
+                    # Reset hold time
+                    if hasattr(self.state, 'hold_start_time'):
+                        delattr(self.state, 'hold_start_time')
+                    print("[Anti-Recoil] Stopped - Key released")
+                else:
+                    # Reset hold time nếu đang chờ hold
+                    if hasattr(self.state, 'hold_start_time'):
+                        delattr(self.state, 'hold_start_time')
+                        print("[Anti-Recoil] Hold cancelled - Key released before completion")
             
-            # Chỉ chạy anti-recoil khi đang active
-            if self.state.is_anti_recoil_active:
-                self._apply_anti_recoil()
             
         except Exception as e:
             print(f"[Anti-Recoil Error] {e}")
@@ -192,7 +223,7 @@ class AntiRecoil:
         """
         try:
             # Lấy vị trí hiện tại
-            current_pos = smooth_movement.get_position()
+            current_pos = self.controller.get_position()
             if not current_pos:
                 return
             
@@ -211,12 +242,15 @@ class AntiRecoil:
             print(f"[Anti-Recoil] Returning to start position: X={dx}, Y={dy}")
             
             # Sử dụng smooth movement để quay về
-            smooth_movement.move_smooth_to_position(
-                current_x, current_y,
-                start_x, start_y,
-                duration_ms=None,  # Random duration
-                ease_type="ease_out"  # Ease out cho mượt mà
-            )
+            if hasattr(self.controller, "move_smooth"):
+                self.controller.move_smooth(
+                    dx, dy,
+                    segments=max(1, int(self.smooth_segments)),
+                    ctrl_scale=float(self.smooth_ctrl_scale)
+                )
+            else:
+                # Fallback về chuyển động thông thường
+                self.controller.move(dx, dy)
                 
         except Exception as e:
             print(f"[Anti-Recoil Return Error] {e}")
