@@ -10,7 +10,6 @@
     "tbdelay": 0.0,
     "trigger_fire_rate_ms": 100,
     "color": "purple",
-    "mode": "Normal",
     "enableaim": true,
     "enabletb": true,
     "aim_button_1": 1,

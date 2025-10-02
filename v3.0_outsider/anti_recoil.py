@@ -5,6 +5,7 @@ import time
 import random
 from config import config
 from mouse import Mouse, is_button_pressed
+from smooth import smooth_movement
 
 
 class AntiRecoilState:
@@ -20,13 +21,13 @@ class AntiRecoilState:
         self.ads_start_time = 0  # Thời điểm bắt đầu giữ ADS
         self.is_triggering = False  # Trạng thái đang bắn
         self.trigger_start_time = 0  # Thời điểm bắt đầu bắn
-        self.total_recoil_x = 0  # Tổng recoil X đã áp dụng
-        self.total_recoil_y = 0  # Tổng recoil Y đã áp dụng
         self.was_triggering = False  # Trạng thái bắn trước đó
         
-        # ========== TRẠNG THÁI MỚI CHO 1 PHÍM ==========
+        # ========== TRẠNG THÁI MỚI CHO 2 PHÍM ==========
         self.is_anti_recoil_active = False  # Trạng thái anti-recoil đang chạy
         self.initial_target_detected = False  # Đã phát hiện mục tiêu ban đầu
+        self.start_mouse_x = 0  # Vị trí chuột khi bắt đầu
+        self.start_mouse_y = 0  # Vị trí chuột khi bắt đầu
 
 
 class AntiRecoil:
@@ -96,7 +97,8 @@ class AntiRecoil:
         HÀM XỬ LÝ ANTI-RECOIL CHÍNH (CẬP NHẬT)
         - Sử dụng 2 phím để điều khiển
         - Kiểm tra hold time trước khi kích hoạt
-        - Tiếp tục chạy cho đến khi thả phím
+        - Lưu vị trí chuột khi bắt đầu
+        - Quay về vị trí ban đầu khi dừng
         """
         if not self.enabled:
             return
@@ -116,14 +118,23 @@ class AntiRecoil:
                         if held_time < self.hold_time_ms:
                             return  # Chưa đủ thời gian hold
                 
+                # Lưu vị trí chuột khi bắt đầu
+                current_pos = smooth_movement.get_position()
+                if current_pos:
+                    self.state.start_mouse_x, self.state.start_mouse_y = current_pos
+                
                 self.state.is_anti_recoil_active = True
                 self.state.initial_target_detected = True
                 print("[Anti-Recoil] Started - Key pressed")
             
             elif not key_pressed and self.state.is_anti_recoil_active:
-                # Dừng: Thả phím
+                # Dừng: Thả phím - Quay về vị trí ban đầu
                 self.state.is_anti_recoil_active = False
                 self.state.initial_target_detected = False
+                
+                # Quay về vị trí ban đầu với smooth movement
+                self._return_to_start_position()
+                
                 if hasattr(self.state, 'hold_start_time'):
                     delattr(self.state, 'hold_start_time')  # Reset hold time
                 print("[Anti-Recoil] Stopped - Key released")
@@ -137,22 +148,23 @@ class AntiRecoil:
 
 
     def _apply_anti_recoil(self):
-        """Áp dụng chuyển động anti-recoil"""
+        """Áp dụng chuyển động anti-recoil - chỉ Y recoil"""
         try:
-            # Tính toán chuyển động cơ bản
-            dx = int(self.x_recoil)
-            dy = int(self.y_recoil)
+            # Kiểm tra fire rate
+            now_ms = time.time() * 1000
+            if now_ms - self.state.last_pull_ms < self.fire_rate_ms:
+                return  # Chưa đủ thời gian fire rate
+            
+            # Tính toán chuyển động - chỉ Y recoil (xuống dưới)
+            dx = 0  # Không di chuyển ngang
+            dy = int(self.y_recoil)  # Chỉ di chuyển xuống dưới
 
-            # Thêm random jitter nếu được bật (SỬA LỖI: chuyển float thành int)
-            if self.random_jitter_x > 0:
-                jitter_x = int(self.random_jitter_x)
-                dx += random.randint(-jitter_x, jitter_x)
+            # Thêm random jitter Y nếu được bật
             if self.random_jitter_y > 0:
                 jitter_y = int(self.random_jitter_y)
                 dy += random.randint(-jitter_y, jitter_y)
 
             # Áp dụng scale với ADS
-            dx = int(dx * self.scale_with_ads)
             dy = int(dy * self.scale_with_ads)
 
             # Thực hiện chuyển động chuột
@@ -167,44 +179,44 @@ class AntiRecoil:
                 # Fallback về chuyển động thông thường
                 self.controller.move(dx, dy)
 
-            # Cập nhật tổng recoil đã áp dụng
-            self.state.total_recoil_x += dx
-            self.state.total_recoil_y += dy
-
             # Cập nhật thời gian pull cuối cùng
-            self.state.last_pull_ms = time.time() * 1000
+            self.state.last_pull_ms = now_ms
 
         except Exception as e:
             print(f"[Anti-Recoil Apply Error] {e}")
 
-    def _return_to_original_position(self):
+    def _return_to_start_position(self):
         """
-        HÀM TỰ ĐỘNG TRỞ VỀ VỊ TRÍ CŨ
-        Di chuyển chuột ngược lại để bù trừ tất cả recoil đã áp dụng
+        HÀM QUAY VỀ VỊ TRÍ BAN ĐẦU
+        Di chuyển chuột về vị trí khi bắt đầu anti-recoil với smooth movement
         """
         try:
-            if self.state.total_recoil_x != 0 or self.state.total_recoil_y != 0:
-                # Di chuyển ngược lại với tổng recoil đã áp dụng
-                return_x = -self.state.total_recoil_x
-                return_y = -self.state.total_recoil_y
-                
-                print(f"[Anti-Recoil] Returning to original position: X={return_x}, Y={return_y}")
-                
-                # Thực hiện chuyển động trở về
-                if hasattr(self.controller, "move_smooth"):
-                    # Sử dụng chuyển động mượt để trở về
-                    self.controller.move_smooth(
-                        return_x, return_y,
-                        segments=max(1, int(self.smooth_segments)),
-                        ctrl_scale=float(self.smooth_ctrl_scale)
-                    )
-                else:
-                    # Fallback về chuyển động thông thường
-                    self.controller.move(return_x, return_y)
-                
-                # Reset tổng recoil
-                self.state.total_recoil_x = 0
-                self.state.total_recoil_y = 0
+            # Lấy vị trí hiện tại
+            current_pos = smooth_movement.get_position()
+            if not current_pos:
+                return
+            
+            current_x, current_y = current_pos
+            start_x = self.state.start_mouse_x
+            start_y = self.state.start_mouse_y
+            
+            # Tính khoảng cách
+            dx = start_x - current_x
+            dy = start_y - current_y
+            distance = (dx * dx + dy * dy) ** 0.5
+            
+            if distance < 1:  # Quá gần, không cần di chuyển
+                return
+            
+            print(f"[Anti-Recoil] Returning to start position: X={dx}, Y={dy}")
+            
+            # Sử dụng smooth movement để quay về
+            smooth_movement.move_smooth_to_position(
+                current_x, current_y,
+                start_x, start_y,
+                duration_ms=None,  # Random duration
+                ease_type="ease_out"  # Ease out cho mượt mà
+            )
                 
         except Exception as e:
             print(f"[Anti-Recoil Return Error] {e}")

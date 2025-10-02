@@ -345,7 +345,6 @@ class ViewerApp(ctk.CTk):
             "color": getattr(config, "color", "yellow"),                     # Màu sắc phát hiện
             
             # ========== CÀI ĐẶT CHUNG ==========
-            "mode": getattr(config, "mode", "Normal"),                       # Chế độ aimbot
             "enableaim": getattr(config, "enableaim", False),                # Bật/tắt aimbot
             "enabletb": getattr(config, "enabletb", False),                  # Bật/tắt triggerbot
             
@@ -762,17 +761,6 @@ class ViewerApp(ctk.CTk):
 
 
 
-        # X Recoil
-        s, l = self._add_slider_with_label(
-            self.tab_ar,
-            "X Recoil",
-            -50,
-            50,
-            float(getattr(config, "anti_recoil_x", 0)),
-            self._on_anti_recoil_x_changed,
-            is_float=True,
-        )
-        self._register_slider("anti_recoil_x", s, l, -50, 50, True)
 
         # Y Recoil
         s, l = self._add_slider_with_label(
@@ -809,6 +797,7 @@ class ViewerApp(ctk.CTk):
             is_float=True,
         )
         self._register_slider("anti_recoil_hold_time", s, l, 0, 2000, True)
+
 
         # Scale with ADS
         s, l = self._add_slider_with_label(
@@ -989,9 +978,6 @@ class ViewerApp(ctk.CTk):
         config.anti_recoil_key_2 = key_code
         self.anti_recoil.update_config()
 
-    def _on_anti_recoil_x_changed(self, val):
-        config.anti_recoil_x = val
-        self.anti_recoil.x_recoil = val
 
     def _on_anti_recoil_y_changed(self, val):
         config.anti_recoil_y = val
@@ -1004,6 +990,7 @@ class ViewerApp(ctk.CTk):
     def _on_anti_recoil_hold_time_changed(self, val):
         config.anti_recoil_hold_time = val
         self.anti_recoil.hold_time_ms = val
+
 
     def _on_anti_recoil_scale_ads_changed(self, val):
         config.anti_recoil_scale_ads = val

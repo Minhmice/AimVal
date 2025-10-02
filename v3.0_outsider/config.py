@@ -23,13 +23,11 @@ class Config:
         self.trigger_button = 1  # Button cho triggerbot
         self.in_game_sens = 0.235
         self.mouse_dpi = 800
-        # --- Aimbot Mode ---
-        self.mode = "Normal"
 
         self.fovsize = 100
         self.tbfovsize = 5
         self.tbdelay = 0.5
-        self.trigger_fire_rate_ms = 100  # Tốc độ bắn triggerbot (millisecond)
+        self.trigger_fire_rate_ms = 100
         # --- Normal Aim ---
         self.normal_x_speed = 3
         self.normal_y_speed = 3
@@ -39,8 +37,8 @@ class Config:
 
         # --- Anti-Recoil Settings ---
         self.anti_recoil_enabled = False
-        self.anti_recoil_key_1 = 3  # Side Mouse 4 (phím 1)
-        self.anti_recoil_key_2 = 4  # Side Mouse 5 (phím 2)
+        self.anti_recoil_key_1 = 3
+        self.anti_recoil_key_2 = 4
         self.anti_recoil_x = 0
         self.anti_recoil_y = 0
         self.anti_recoil_fire_rate = 100

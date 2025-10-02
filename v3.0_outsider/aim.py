@@ -3,7 +3,7 @@
 # ============================
 # File này là module aimbot chính - xử lý logic nhắm và bắn tự động trong game
 # Sử dụng AI (YOLO) để phát hiện mục tiêu và điều khiển chuột để nhắm bắn
-# Hỗ trợ 2 chế độ: Normal (mượt mà) và Silent (ẩn giấu)
+# Aimbot mượt mà với smoothing
 # Có triggerbot: tự động bắn khi phát hiện màu sắc cụ thể
 
 import threading  # Đa luồng để xử lý song song
@@ -16,25 +16,12 @@ from config import config  # Module cấu hình của ứng dụng
 from mouse import Mouse, is_button_pressed  # Module điều khiển chuột
 
 
-def threaded_silent_move(controller, dx, dy):
-    """
-    HÀM CHẾ ĐỘ SILENT - DI CHUYỂN ẨN GIẤU
-    Chế độ Silent: di chuyển chuột đến mục tiêu, bắn, rồi di chuyển ngược lại
-    để che giấu hành vi aimbot khỏi hệ thống chống cheat
-    """
-    controller.move(dx, dy)      # Di chuyển chuột đến vị trí mục tiêu
-    time.sleep(0.001)           # Chờ 1ms để đảm bảo di chuyển hoàn tất
-    controller.click()          # Click chuột để bắn
-    time.sleep(0.001)           # Chờ 1ms để đảm bảo click hoàn tất
-    controller.move(-dx, -dy)   # Di chuyển ngược lại vị trí ban đầu để ẩn giấu
-
-
 class AimTracker:
     """
     LỚP AIMBOT CHÍNH - XỬ LÝ LOGIC NHẮM VÀ BẮN TỰ ĐỘNG
     - Phát hiện mục tiêu bằng AI (YOLO/computer vision)
     - Tính toán chuyển động chuột để nhắm vào mục tiêu
-    - Hỗ trợ 2 chế độ: Normal (mượt mà) và Silent (ẩn)
+    - Aimbot mượt mà với smoothing
     - Triggerbot: tự động bắn khi phát hiện màu sắc
     """
     def __init__(self, app, detection_engine, target_fps=80):
@@ -68,8 +55,7 @@ class AimTracker:
         self.last_tb_click_time = 0                                          # Thời điểm click cuối cùng
         self.color = getattr(config, "color", "purple")                     # Màu sắc để triggerbot phát hiện
         
-        # Tham số chế độ và phím
-        self.mode = getattr(config, "mode", "Normal")                        # Chế độ: Normal hoặc Silent
+        # Tham số phím
         self.selected_mouse_button = (getattr(config, "selected_mouse_button", 3),)  # Nút chuột aim
         self.selected_tb_btn = getattr(config, "selected_tb_btn", 3)         # Nút chuột triggerbot
 
@@ -269,60 +255,44 @@ class AimTracker:
         ndx = dx * deg_per_count  # Count X cần di chuyển
         ndy = dy * deg_per_count  # Count Y cần di chuyển
 
-        # ========== THỰC HIỆN AIMBOT THEO CHẾ ĐỘ ==========
-        mode = getattr(config, "mode", "Normal")  # Lấy chế độ từ config
-        if mode == "Normal":
-            try:
-                # ========== CHẾ ĐỘ NORMAL - AIMBOT MƯỢT MÀ ==========
-                # Thực hiện aimbot nếu được bật, có phím được nhấn và có mục tiêu
-                if aim_enabled and aim_pressed and targets:
-                    if distance_to_center < int(getattr(config, "normalsmoothfov", self.normalsmoothfov)):
-                        # Gần mục tiêu → áp dụng smoothing để mượt mà hơn
-                        ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed)) / max(
-                            int(getattr(config, "normalsmooth", self.normalsmooth)), 1
-                        )
-                        ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed)) / max(
-                            int(getattr(config, "normalsmooth", self.normalsmooth)), 1
-                        )
-                    else:
-                        # Xa mục tiêu → không smoothing, di chuyển nhanh
-                        ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed))
-                        ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed))
-                    
-                    # Giới hạn tốc độ và thêm vào hàng đợi
-                    ddx, ddy = self._clip_movement(ndx, ndy)
-                    self.move_queue.put((ddx, ddy, 0.005))  # Thêm delay 5ms
-            except Exception:
-                pass  # Bỏ qua lỗi aimbot
+        # ========== THỰC HIỆN AIMBOT ==========
+        try:
+            # ========== AIMBOT MƯỢT MÀ ==========
+            # Thực hiện aimbot nếu được bật, có phím được nhấn và có mục tiêu
+            if aim_enabled and aim_pressed and targets:
+                if distance_to_center < int(getattr(config, "normalsmoothfov", self.normalsmoothfov)):
+                    # Gần mục tiêu → áp dụng smoothing để mượt mà hơn
+                    ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed)) / max(
+                        int(getattr(config, "normalsmooth", self.normalsmooth)), 1
+                    )
+                    ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed)) / max(
+                        int(getattr(config, "normalsmooth", self.normalsmooth)), 1
+                    )
+                else:
+                    # Xa mục tiêu → không smoothing, di chuyển nhanh
+                    ndx *= int(getattr(config, "normal_x_speed", self.normal_x_speed))
+                    ndy *= int(getattr(config, "normal_y_speed", self.normal_y_speed))
+                
+                # Giới hạn tốc độ và thêm vào hàng đợi
+                ddx, ddy = self._clip_movement(ndx, ndy)
+                self.move_queue.put((ddx, ddy, 0.005))  # Thêm delay 5ms
+        except Exception:
+            pass  # Bỏ qua lỗi aimbot
 
-            try:
-                # ========== TRIGGERBOT - TỰ ĐỘNG BẮN KHI PHÁT HIỆN MÀU SẮC ==========
-                # Kiểm tra triggerbot có được bật và phím có được nhấn không
-                if (getattr(config, "enabletb", False) and 
-                    is_button_pressed(getattr(config, "trigger_button", 1))):
-                    
-                    # Sử dụng kết quả detection từ DetectionEngine (không cần detect riêng)
-                    if center_detection:
-                        # Có phát hiện màu sắc ở trung tâm → tự động bắn
-                        now = time.time()
-                        # Kiểm tra delay để tránh bắn quá nhanh
-                        if now - self.last_tb_click_time >= int(getattr(config, "tbdelay", self.tbdelay)):
-                            self.controller.click()  # Bắn
-                            self.last_tb_click_time = now  # Cập nhật thời gian bắn cuối
+        try:
+            # ========== TRIGGERBOT - TỰ ĐỘNG BẮN KHI PHÁT HIỆN MÀU SẮC ==========
+            # Kiểm tra triggerbot có được bật và phím có được nhấn không
+            if (getattr(config, "enabletb", False) and 
+                is_button_pressed(getattr(config, "trigger_button", 1))):
+                
+                # Sử dụng kết quả detection từ DetectionEngine (không cần detect riêng)
+                if center_detection:
+                    # Có phát hiện màu sắc ở trung tâm → tự động bắn
+                    now = time.time()
+                    # Kiểm tra delay để tránh bắn quá nhanh
+                    if now - self.last_tb_click_time >= int(getattr(config, "tbdelay", self.tbdelay)):
+                        self.controller.click()  # Bắn
+                        self.last_tb_click_time = now  # Cập nhật thời gian bắn cuối
 
-            except Exception as e:
-                print(f"[Aimbot Triggerbot Error] {e}")
-
-        elif mode == "Silent":
-            # ========== CHẾ ĐỘ SILENT - AIMBOT ẨN GIẤU ==========
-            if aim_enabled and aim_pressed and targets:  # Kiểm tra phím và mục tiêu
-                dx_raw = int(dx)  # Chuyển thành int
-                dy_raw = int(dy)  # Chuyển thành int
-                dx_raw *= self.normal_x_speed  # Áp dụng tốc độ
-                dy_raw *= self.normal_y_speed  # Áp dụng tốc độ
-                # Chạy trong luồng riêng để không block luồng chính
-                threading.Thread(
-                    target=threaded_silent_move,  # Hàm di chuyển ẩn giấu
-                    args=(self.controller, dx_raw, dy_raw),
-                    daemon=True,
-                ).start()
+        except Exception as e:
+            print(f"[Aimbot Triggerbot Error] {e}")
