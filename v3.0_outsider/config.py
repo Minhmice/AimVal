@@ -29,8 +29,8 @@ class Config:
         self.tbdelay = 0.5
         self.trigger_fire_rate_ms = 100
         # --- Normal Aim ---
-        self.normal_x_speed = 3
-        self.normal_y_speed = 3
+        self.normal_x_speed = 3.0
+        self.normal_y_speed = 3.0
 
         self.normalsmooth = 30
         self.normalsmoothfov = 30
