@@ -59,6 +59,8 @@ v3.1/
 - ✅ Config save/load
 - ✅ Real-time status display
 - ✅ **Auto-start UDP on port 8080**
+- ✅ **UDP Stream status indicator**
+- ✅ **Auto-refresh status every 1 second**
 
 ## ⚙️ Configuration
 

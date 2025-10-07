@@ -112,7 +112,7 @@ class ViewerApp(ctk.CTk):
         self.detection_engine = DetectionEngine()  # Tạo Detection Engine
         
         # Tạo các module chính của ứng dụng
-        self.tracker = AimTracker(app=self, detection_engine=self.detection_engine, target_fps=80)  # Tạo aimbot với DetectionEngine
+        self.tracker = AimTracker(app=self, detection_engine=self.detection_engine, target_fps=240)  # Tạo aimbot với DetectionEngine
         self.anti_recoil = AntiRecoil(app=self)  # Tạo anti-recoil
 
         # ========== TẠO GIAO DIỆN TAB ==========
@@ -152,7 +152,8 @@ class ViewerApp(ctk.CTk):
         
         # ========== TỰ ĐỘNG KHỞI ĐỘNG UDP ==========
         # Tự động start UDP với port mặc định khi khởi động GUI
-        self.after(100, self._auto_start_udp)  # Delay 100ms để UI load xong
+        # Gọi sau khi UI hoàn tất với delay 1000ms để đảm bảo mọi thứ đã ready
+        self.after(1000, self._auto_start_udp)
 
     # ========== CÁC HÀM HỖ TRỢ ĐỒNG BỘ UI ==========
     def _register_slider(self, key, slider, label, vmin, vmax, is_float):
@@ -1046,6 +1047,7 @@ class ViewerApp(ctk.CTk):
         Tự động start UDP với port mặc định (8080) khi khởi động ứng dụng
         User không cần phải nhấn Start UDP hay config gì cả
         """
+        print("[GUI] _auto_start_udp called!")  # Debug
         try:
             port = 8080  # Port mặc định
             print(f"[GUI] Auto-starting UDP on port {port}...")
@@ -1054,9 +1056,11 @@ class ViewerApp(ctk.CTk):
             rcvbuf = getattr(config, "viewer_rcvbuf_mb", 256)
             max_assembly = 256 * 1024 * 1024
             
+            print(f"[GUI] Stopping existing receiver if any...")
             if self.receiver is not None:
                 self._stop_udp()
             
+            print(f"[GUI] Creating new receiver...")
             self.rx_store = _LatestBytesStore()
             self.decoder = _Decoder()
             self.last_decoded_seq = -1
@@ -1064,9 +1068,12 @@ class ViewerApp(ctk.CTk):
             self.receiver = _Receiver(
                 "0.0.0.0", port, rcvbuf, max_assembly, self.rx_store
             )
+            
+            print(f"[GUI] Starting receiver...")
             self.receiver.start()
             
             # Start display thread
+            print(f"[GUI] Starting display thread...")
             if self.display_thread is None or not self.display_thread.is_alive():
                 self.display_thread = DisplayThread(
                     self, self.vision_store, self.mask_store
@@ -1077,11 +1084,13 @@ class ViewerApp(ctk.CTk):
             self.status_label.configure(
                 text=f"UDP listening on :{port}", text_color="green"
             )
-            print(f"[GUI] UDP auto-started successfully on port {port}")
+            print(f"[GUI] ✓ UDP auto-started successfully on port {port}")
         except Exception as e:
+            import traceback
             self.connected = False
             self.status_label.configure(text=f"UDP error: {e}", text_color="red")
-            print(f"[GUI] UDP auto-start failed: {e}")
+            print(f"[GUI] ✗ UDP auto-start failed: {e}")
+            traceback.print_exc()  # Print full traceback
     
     def _start_udp(self):
         try:

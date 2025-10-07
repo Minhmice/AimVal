@@ -38,6 +38,14 @@ class UserCLI:
         self.running = True
         self.connected = False
         
+        # Status metrics (khởi tạo mặc định)
+        self.current_fps = 0
+        self.current_latency = 0
+        self.stream_active = False  # Trạng thái UDP stream
+        self.last_frame_time = 0    # Thời gian nhận frame cuối
+        self.in_menu = True         # Đang ở main menu hay không
+        self.last_status_update = time.time()  # Lần update cuối
+        
         # UDP và video (ẩn khỏi user)
         self.receiver = None
         self.rx_store = _LatestBytesStore()
@@ -79,10 +87,11 @@ class UserCLI:
             self.receiver = _Receiver("0.0.0.0", port, rcvbuf, max_assembly, self.rx_store)
             self.receiver.start()
             self.connected = True
-            print(f"[CLI] UDP auto-started successfully on port {port}")
+            print(f"[CLI] ✓ UDP auto-started successfully on port {port}")
+            print(f"[CLI] Waiting for video stream... (FPS will show when data arrives)")
         except Exception as e:
             self.connected = False
-            print(f"[CLI] UDP auto-start failed: {e}")
+            print(f"[CLI] ✗ UDP auto-start failed: {e}")
     
     def start_status_monitoring(self):
         """Bắt đầu monitoring status"""
@@ -95,21 +104,37 @@ class UserCLI:
             try:
                 if self.receiver is not None:
                     self.connected = True
-                    _, _, avg_ms, avg_fps = self.rx_store.get_latest()
+                    buf, seq, avg_ms, avg_fps = self.rx_store.get_latest()
+                    
+                    # Kiểm tra có stream data không
+                    if buf is not None and len(buf) > 0:
+                        self.stream_active = True
+                        self.last_frame_time = time.time()
+                    else:
+                        # Nếu không nhận frame trong 2 giây → stream inactive
+                        if time.time() - self.last_frame_time > 2.0:
+                            self.stream_active = False
+                    
                     if avg_ms is not None and avg_fps is not None:
                         self.current_fps = avg_fps
                         self.current_latency = avg_ms
+                        # Debug: Print FPS update
+                        # print(f"[CLI Status] FPS: {avg_fps:.1f}, Latency: {avg_ms:.1f}ms")
                     else:
                         self.current_fps = 0
                         self.current_latency = 0
                 else:
                     self.connected = False
+                    self.stream_active = False
                     self.current_fps = 0
                     self.current_latency = 0
-            except Exception:
+            except Exception as e:
                 self.connected = False
+                self.stream_active = False
                 self.current_fps = 0
                 self.current_latency = 0
+                # Debug: Print error
+                # print(f"[CLI Status Error] {e}")
             
             time.sleep(0.5)  # Update mỗi 500ms
     
@@ -147,6 +172,13 @@ class UserCLI:
         print("│                Client Status                                │")
         print("├─────────────────────────────────────────────────────────────┤")
         
+        # UDP Stream Status
+        if self.stream_active:
+            stream_status = "● Receiving"
+        else:
+            stream_status = "○ Waiting..."
+        print(f"│  UDP Stream: [{stream_status}]")
+        
         # FPS và Latency
         fps_text = f"{self.current_fps:.1f}" if hasattr(self, 'current_fps') and self.current_fps > 0 else "--"
         latency_text = f"{self.current_latency:.1f}" if hasattr(self, 'current_latency') and self.current_latency > 0 else "--"
@@ -164,6 +196,11 @@ class UserCLI:
         recoil_status = "● Active" if getattr(config, "anti_recoil_enabled", False) else "○ Inactive"
         print(f"│  Anti-Recoil: [{recoil_status}]")
         
+        # Thời gian cập nhật
+        import datetime
+        current_time = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"│  Last Update: {current_time}                                    │")
+        
         print("└─────────────────────────────────────────────────────────────┘")
         print()
     
@@ -178,8 +215,10 @@ class UserCLI:
         print("│  [4] Mouse Settings                                        │")
         print("│  [5] Save Config                                           │")
         print("│  [6] Load Config                                           │")
+        print("│  [R] Manual Refresh                                        │")
         print("│  [0] Exit                                                  │")
         print("└─────────────────────────────────────────────────────────────┘")
+        print("  ⟳ Status auto-updates every 1 second")
         print()
     
     def get_input(self, prompt, input_type=str, min_val=None, max_val=None):
@@ -187,6 +226,11 @@ class UserCLI:
         while True:
             try:
                 user_input = input(prompt).strip()
+                
+                # Xử lý phím đặc biệt
+                if user_input.upper() == 'R' and input_type == int:
+                    return -1  # Signal để refresh
+                
                 if input_type == int:
                     value = int(user_input)
                 elif input_type == float:
@@ -203,6 +247,8 @@ class UserCLI:
                 
                 return value
             except ValueError:
+                if user_input.upper() == 'R':
+                    return -1  # Signal để refresh
                 print("Invalid input. Please try again.")
             except KeyboardInterrupt:
                 return None
@@ -677,15 +723,26 @@ class UserCLI:
     def run(self):
         """Chạy CLI interface"""
         try:
+            # Bắt đầu auto-refresh thread
+            refresh_thread = threading.Thread(target=self._auto_refresh_loop, daemon=True)
+            refresh_thread.start()
+            
             while self.running:
+                self.in_menu = True
                 self.clear_screen()
                 self.print_header()
                 self.print_status()
                 self.print_main_menu()
                 
-                choice = self.get_input("Enter option (0-6): ", int, 0, 6)
+                choice = self.get_input("Enter option (0-6, R to refresh): ", int, 0, 6)
                 if choice is None:
                     break
+                
+                self.in_menu = False  # Đã rời khỏi main menu
+                
+                # Xử lý refresh (R key)
+                if choice == -1:
+                    continue  # Refresh main menu
                 
                 if choice == 0:
                     break
@@ -707,6 +764,40 @@ class UserCLI:
         
         finally:
             self.cleanup()
+    
+    def _auto_refresh_loop(self):
+        """Thread tự động refresh status mỗi 1 giây khi đang ở main menu"""
+        while self.running:
+            try:
+                time.sleep(1)  # Chờ 1 giây
+                
+                # Chỉ refresh khi đang ở main menu và đã qua 1 giây từ lần update cuối
+                if self.in_menu and (time.time() - self.last_status_update >= 1.0):
+                    # Clear và re-print status
+                    self._refresh_status_display()
+                    self.last_status_update = time.time()
+            except Exception:
+                pass
+    
+    def _refresh_status_display(self):
+        """Refresh status display tại chỗ (không clear toàn màn hình)"""
+        try:
+            # Di chuyển cursor về đầu status section
+            # ANSI escape codes: move cursor up
+            import sys
+            
+            # Save cursor position, clear screen, print status
+            sys.stdout.write('\033[s')  # Save cursor position
+            sys.stdout.write('\033[H')  # Move to top
+            
+            self.print_header()
+            self.print_status()
+            self.print_main_menu()
+            
+            sys.stdout.write('\033[u')  # Restore cursor position
+            sys.stdout.flush()
+        except Exception:
+            pass  # Nếu lỗi thì bỏ qua
     
     def cleanup(self):
         """Dọn dẹp khi thoát"""
