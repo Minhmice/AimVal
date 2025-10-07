@@ -18,19 +18,19 @@ class Config:
         # --- Mouse / MAKCU ---
         # Aimbot buttons (2 buttons)
         self.aim_button_1 = 1  # Button đầu tiên cho aim
-        self.aim_button_2 = 2  # Button thứ hai cho aim
+        self.aim_button_2 = 5  # Button thứ hai cho aim
         # Triggerbot button (1 button)
-        self.trigger_button = 1  # Button cho triggerbot
-        self.in_game_sens = 0.235
-        self.mouse_dpi = 800
+        self.trigger_button = 5  # Button cho triggerbot
+        self.in_game_sens = 0.189
+        self.mouse_dpi = 1600
 
         self.fovsize = 100
         self.tbfovsize = 5
         self.tbdelay = 0.5
         self.trigger_fire_rate_ms = 100
         # --- Normal Aim ---
-        self.normal_x_speed = 3.0
-        self.normal_y_speed = 3.0
+        self.normal_x_speed = 400
+        self.normal_y_speed = 400
 
         self.normalsmooth = 30
         self.normalsmoothfov = 30

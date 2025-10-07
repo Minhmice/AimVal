@@ -23,6 +23,18 @@ from viewer import (
     DisplayThread,
 )
 
+# ========== MAPPING CÁC NÚT CHUỘT ==========
+BUTTONS = {
+    0: "Left Mouse Button",
+    1: "Right Mouse Button",
+    2: "Middle Mouse Button",
+    3: "Side Mouse 4 Button",
+    4: "Side Mouse 5 Button",
+}
+
+# Reverse mapping để tìm button code từ tên
+BUTTON_NAMES_TO_CODE = {v: k for k, v in BUTTONS.items()}
+
 
 class UserCLI:
     """
@@ -269,12 +281,17 @@ class UserCLI:
             print("│  │                                                         │ │")
             
             aim_enabled = "Enabled" if getattr(config, "enableaim", False) else "Disabled"
+            aim_btn1 = BUTTONS.get(getattr(config, 'aim_button_1', 1), "Right Mouse Button")
+            aim_btn2 = BUTTONS.get(getattr(config, 'aim_button_2', 2), "Middle Mouse Button")
+            
             print(f"│  │  Status: [{'●' if getattr(config, 'enableaim', False) else '○'}] {aim_enabled:<40} │ │")
             print(f"│  │  X Speed: {getattr(config, 'normal_x_speed', 0.5):<45} │ │")
             print(f"│  │  Y Speed: {getattr(config, 'normal_y_speed', 0.5):<45} │ │")
             print(f"│  │  FOV Size: {getattr(config, 'fovsize', 300):<44} │ │")
             print(f"│  │  Smoothing: {getattr(config, 'normalsmooth', 10):<42} │ │")
             print(f"│  │  Smoothing FOV: {getattr(config, 'normalsmoothfov', 10):<38} │ │")
+            print(f"│  │  Aim Button 1: {aim_btn1:<41} │ │")
+            print(f"│  │  Aim Button 2: {aim_btn2:<41} │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("│                                                             │")
             
@@ -288,12 +305,14 @@ class UserCLI:
             print("│  │  [4] Set FOV Size (1-1000)                             │ │")
             print("│  │  [5] Set Smoothing (1-30)                              │ │")
             print("│  │  [6] Set Smoothing FOV (1-30)                          │ │")
+            print("│  │  [7] Set Aim Button 1                                  │ │")
+            print("│  │  [8] Set Aim Button 2                                  │ │")
             print("│  │  [0] Back to Main Menu                                 │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("└─────────────────────────────────────────────────────────────┘")
             print()
             
-            choice = self.get_input("Enter option (0-6): ", int, 0, 6)
+            choice = self.get_input("Enter option (0-8): ", int, 0, 8)
             if choice is None:
                 return
             
@@ -346,6 +365,28 @@ class UserCLI:
                     self.tracker.normalsmoothfov = new_value
                     print(f"Smoothing FOV updated to {new_value}")
                     input("Press Enter to continue...")
+            elif choice == 7:
+                # Set Aim Button 1
+                print("\nSelect Aim Button 1:")
+                for code, name in BUTTONS.items():
+                    print(f"  [{code}] {name}")
+                btn_choice = self.get_input("Enter button number (0-4): ", int, 0, 4)
+                if btn_choice is not None:
+                    config.aim_button_1 = btn_choice
+                    self.tracker.aim_button_1 = btn_choice
+                    print(f"Aim Button 1 updated to {BUTTONS[btn_choice]}")
+                    input("Press Enter to continue...")
+            elif choice == 8:
+                # Set Aim Button 2
+                print("\nSelect Aim Button 2:")
+                for code, name in BUTTONS.items():
+                    print(f"  [{code}] {name}")
+                btn_choice = self.get_input("Enter button number (0-4): ", int, 0, 4)
+                if btn_choice is not None:
+                    config.aim_button_2 = btn_choice
+                    self.tracker.aim_button_2 = btn_choice
+                    print(f"Aim Button 2 updated to {BUTTONS[btn_choice]}")
+                    input("Press Enter to continue...")
     
     def triggerbot_menu(self):
         """Menu cài đặt Triggerbot"""
@@ -363,10 +404,13 @@ class UserCLI:
             print("│  │                                                         │ │")
             
             trigger_enabled = "Enabled" if getattr(config, "enabletb", False) else "Disabled"
+            trigger_btn = BUTTONS.get(getattr(config, 'trigger_button', 1), "Right Mouse Button")
+            
             print(f"│  │  Status: [{'●' if getattr(config, 'enabletb', False) else '○'}] {trigger_enabled:<40} │ │")
             print(f"│  │  FOV Size: {getattr(config, 'tbfovsize', 70):<44} │ │")
             print(f"│  │  Delay: {getattr(config, 'tbdelay', 0.08):.3f} seconds{'':<32} │ │")
             print(f"│  │  Fire Rate: {getattr(config, 'trigger_fire_rate_ms', 100):<41} ms │ │")
+            print(f"│  │  Trigger Button: {trigger_btn:<39} │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("│                                                             │")
             
@@ -378,12 +422,13 @@ class UserCLI:
             print("│  │  [2] Set FOV Size (1-300)                              │ │")
             print("│  │  [3] Set Delay (0.0-1.0 seconds)                       │ │")
             print("│  │  [4] Set Fire Rate (10-1000 ms)                        │ │")
+            print("│  │  [5] Set Trigger Button                                │ │")
             print("│  │  [0] Back to Main Menu                                 │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("└─────────────────────────────────────────────────────────────┘")
             print()
             
-            choice = self.get_input("Enter option (0-4): ", int, 0, 4)
+            choice = self.get_input("Enter option (0-5): ", int, 0, 5)
             if choice is None:
                 return
             
@@ -420,6 +465,17 @@ class UserCLI:
                     self.tracker.fire_rate_ms = new_value
                     print(f"Fire Rate updated to {new_value} ms")
                     input("Press Enter to continue...")
+            elif choice == 5:
+                # Set Trigger Button
+                print("\nSelect Trigger Button:")
+                for code, name in BUTTONS.items():
+                    print(f"  [{code}] {name}")
+                btn_choice = self.get_input("Enter button number (0-4): ", int, 0, 4)
+                if btn_choice is not None:
+                    config.trigger_button = btn_choice
+                    self.tracker.trigger_button = btn_choice
+                    print(f"Trigger Button updated to {BUTTONS[btn_choice]}")
+                    input("Press Enter to continue...")
     
     def anti_recoil_menu(self):
         """Menu cài đặt Anti-Recoil"""
@@ -437,6 +493,9 @@ class UserCLI:
             print("│  │                                                         │ │")
             
             recoil_enabled = "Enabled" if getattr(config, "anti_recoil_enabled", False) else "Disabled"
+            recoil_btn1 = BUTTONS.get(getattr(config, 'anti_recoil_key_1', 3), "Side Mouse 4 Button")
+            recoil_btn2 = BUTTONS.get(getattr(config, 'anti_recoil_key_2', 4), "Side Mouse 5 Button")
+            
             print(f"│  │  Status: [{'●' if getattr(config, 'anti_recoil_enabled', False) else '○'}] {recoil_enabled:<40} │ │")
             print(f"│  │  Compensation Strength: {getattr(config, 'anti_recoil_compensation_strength', 70):<30}% │ │")
             print(f"│  │  Start Delay: {getattr(config, 'anti_recoil_start_delay', 120):<42} ms │ │")
@@ -444,6 +503,8 @@ class UserCLI:
             print(f"│  │  Y Recoil: {getattr(config, 'anti_recoil_y', 0):<47} │ │")
             print(f"│  │  Jitter X: {getattr(config, 'anti_recoil_jitter_x', 0):<46} │ │")
             print(f"│  │  Jitter Y: {getattr(config, 'anti_recoil_jitter_y', 0):<46} │ │")
+            print(f"│  │  Anti-Recoil Key 1: {recoil_btn1:<36} │ │")
+            print(f"│  │  Anti-Recoil Key 2: {recoil_btn2:<36} │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("│                                                             │")
             
@@ -458,12 +519,14 @@ class UserCLI:
             print("│  │  [5] Set Y Recoil (-50 to 50)                          │ │")
             print("│  │  [6] Set Jitter X (0-20)                               │ │")
             print("│  │  [7] Set Jitter Y (0-20)                               │ │")
+            print("│  │  [8] Set Anti-Recoil Key 1                             │ │")
+            print("│  │  [9] Set Anti-Recoil Key 2                             │ │")
             print("│  │  [0] Back to Main Menu                                 │ │")
             print("│  └─────────────────────────────────────────────────────────┘ │")
             print("└─────────────────────────────────────────────────────────────┘")
             print()
             
-            choice = self.get_input("Enter option (0-7): ", int, 0, 7)
+            choice = self.get_input("Enter option (0-9): ", int, 0, 9)
             if choice is None:
                 return
             
@@ -524,6 +587,28 @@ class UserCLI:
                     config.anti_recoil_jitter_y = new_value
                     self.anti_recoil.random_jitter_y = new_value
                     print(f"Jitter Y updated to {new_value}")
+                    input("Press Enter to continue...")
+            elif choice == 8:
+                # Set Anti-Recoil Key 1
+                print("\nSelect Anti-Recoil Key 1:")
+                for code, name in BUTTONS.items():
+                    print(f"  [{code}] {name}")
+                btn_choice = self.get_input("Enter button number (0-4): ", int, 0, 4)
+                if btn_choice is not None:
+                    config.anti_recoil_key_1 = btn_choice
+                    self.anti_recoil.anti_recoil_key_1 = btn_choice
+                    print(f"Anti-Recoil Key 1 updated to {BUTTONS[btn_choice]}")
+                    input("Press Enter to continue...")
+            elif choice == 9:
+                # Set Anti-Recoil Key 2
+                print("\nSelect Anti-Recoil Key 2:")
+                for code, name in BUTTONS.items():
+                    print(f"  [{code}] {name}")
+                btn_choice = self.get_input("Enter button number (0-4): ", int, 0, 4)
+                if btn_choice is not None:
+                    config.anti_recoil_key_2 = btn_choice
+                    self.anti_recoil.anti_recoil_key_2 = btn_choice
+                    print(f"Anti-Recoil Key 2 updated to {BUTTONS[btn_choice]}")
                     input("Press Enter to continue...")
     
     def mouse_menu(self):
@@ -620,12 +705,15 @@ class UserCLI:
                 "fovsize": getattr(config, "fovsize", 300),
                 "normalsmooth": getattr(config, "normalsmooth", 10),
                 "normalsmoothfov": getattr(config, "normalsmoothfov", 10),
+                "aim_button_1": getattr(config, "aim_button_1", 1),
+                "aim_button_2": getattr(config, "aim_button_2", 2),
                 
                 # Triggerbot settings
                 "enabletb": getattr(config, "enabletb", False),
                 "tbfovsize": getattr(config, "tbfovsize", 70),
                 "tbdelay": getattr(config, "tbdelay", 0.08),
                 "trigger_fire_rate_ms": getattr(config, "trigger_fire_rate_ms", 100),
+                "trigger_button": getattr(config, "trigger_button", 1),
                 
                 # Anti-recoil settings
                 "anti_recoil_enabled": getattr(config, "anti_recoil_enabled", False),
@@ -635,6 +723,8 @@ class UserCLI:
                 "anti_recoil_y": getattr(config, "anti_recoil_y", 0),
                 "anti_recoil_jitter_x": getattr(config, "anti_recoil_jitter_x", 0),
                 "anti_recoil_jitter_y": getattr(config, "anti_recoil_jitter_y", 0),
+                "anti_recoil_key_1": getattr(config, "anti_recoil_key_1", 3),
+                "anti_recoil_key_2": getattr(config, "anti_recoil_key_2", 4),
                 
                 # Mouse settings
                 "mouse_dpi": getattr(config, "mouse_dpi", 800),
@@ -710,6 +800,14 @@ class UserCLI:
             self.tracker.mouse_dpi = getattr(config, "mouse_dpi", 800)
             self.tracker.in_game_sens = getattr(config, "in_game_sens", 0.235)
             self.tracker.max_speed = getattr(config, "max_speed", 1000)
+            
+            # Cập nhật button configs
+            if hasattr(self.tracker, 'aim_button_1'):
+                self.tracker.aim_button_1 = getattr(config, "aim_button_1", 1)
+            if hasattr(self.tracker, 'aim_button_2'):
+                self.tracker.aim_button_2 = getattr(config, "aim_button_2", 2)
+            if hasattr(self.tracker, 'trigger_button'):
+                self.tracker.trigger_button = getattr(config, "trigger_button", 1)
             
             self.anti_recoil.update_config()
             

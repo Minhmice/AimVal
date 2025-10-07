@@ -246,11 +246,7 @@ class Mouse:
     def move(self, x: float, y: float):
         if not is_connected:
             return
-        print(f"Ancien x : {x}")
-        print(f"Ancien y : {y}")
         dx, dy = round(x), round(y)
-        print(f"Après round x : {dx}")
-        print(f"Après round y : {dy}")
         with makcu_lock:
             makcu.write(f"km.move({dx},{dy})\r".encode())
             makcu.flush()
